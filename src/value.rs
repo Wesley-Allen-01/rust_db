@@ -122,6 +122,36 @@ impl PartialEq for Value {
     }
 }
 
+impl From<i64> for Value {
+    fn from(i: i64) -> Self {
+        Value::Int(i)
+    }
+}
+
+impl From<f64> for Value {
+    fn from(f: f64) -> Self {
+        Value::Float(f)
+    }
+}
+
+impl From<String> for Value {
+    fn from(s: String) -> Self {
+        Value::Text(s)
+    }
+}
+
+impl From<&str> for Value {
+    fn from(s: &str) -> Self {
+        Value::Text(s.to_string())
+    }
+}
+
+impl From<bool> for Value {
+    fn from(b: bool) -> Self {
+        Value::Bool(b)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

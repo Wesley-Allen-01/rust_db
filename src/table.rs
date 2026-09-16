@@ -12,7 +12,6 @@ impl Row {
     }
 
     pub fn get(&self, index: usize) -> Option<&Value> {
-
         self.0.get(index)
     }
 
@@ -29,11 +28,9 @@ impl Index<usize> for Row {
     type Output = Value;
 
     fn index(&self, index: usize) -> &Value {
-
         &self.0[index]
     }
 }
-
 
 #[derive(Debug, Clone)]
 pub struct Table {
@@ -73,7 +70,6 @@ impl Table {
         self.rows.len()
     }
 
-
     pub fn insert(&mut self, values: Vec<Value>) -> Result<usize> {
         self.schema.validate_row(&values)?;
 
@@ -90,7 +86,7 @@ impl Table {
                 *slot = Some(Row(values));
                 Ok(true)
             }
-            _ => Ok(false)  
+            _ => Ok(false),
         }
     }
 
@@ -108,7 +104,6 @@ impl Table {
     pub fn get(&self, id: usize) -> Option<&Row> {
         self.rows.get(id)?.as_ref()
     }
-
 
     pub fn iter(&self) -> impl Iterator<Item = &Row> + '_ {
         self.rows.iter().flatten()
@@ -128,3 +123,30 @@ impl Table {
 }
 
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::DbError;
+    use crate::schema::Column;
+    use crate::value::DataType;
+
+    fn users() -> Table {
+        let schema = Schema::new(vec![
+            Column::new("id", DataType::Int),
+            Column::new("name", DataType::Text),
+            Column::new("is_active", DataType::Bool),
+        ]).unwrap();
+        Table::new("users", schema)
+    }
+
+    fn seed() -> Table {
+        let mut u = users();
+        u.insert(vec![1.into(), "ada".into(), true.into()]).unwrap();
+        u.insert(vec![2.into(), "caleb".into(), false.into()]).unwrap();
+        u.insert(vec![3.into(), "hannah".into(), true.into()]).unwrap();
+        u
+    }
+
+    
+}
