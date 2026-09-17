@@ -122,8 +122,6 @@ impl Table {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,16 +134,45 @@ mod tests {
             Column::new("id", DataType::Int),
             Column::new("name", DataType::Text),
             Column::new("is_active", DataType::Bool),
-        ]).unwrap();
+        ])
+        .unwrap();
         Table::new("users", schema)
     }
 
     fn seed() -> Table {
         let mut u = users();
         u.insert(vec![1.into(), "ada".into(), true.into()]).unwrap();
-        u.insert(vec![2.into(), "caleb".into(), false.into()]).unwrap();
-        u.insert(vec![3.into(), "hannah".into(), true.into()]).unwrap();
+        u.insert(vec![2.into(), "caleb".into(), false.into()])
+            .unwrap();
+        u.insert(vec![3.into(), "hannah".into(), true.into()])
+            .unwrap();
         u
+    }
+
+    #[test]
+    fn insert_returns_sequential_ids() {
+        let mut u = users();
+        assert_eq!(u.insert(vec![1.into(), "caleb".into(), true.into()]), Ok(0));
+        assert_eq!(u.insert(vec![2.into(), "zoe".into(), false.into()]), Ok(1));
+        assert_eq!(u.len(), 2);
+    }
+
+    #[test]
+    fn insert_validates_against_schema() {
+        let mut u = users();
+        let err = u.insert(vec![1.into(), 2.into(), true.into()]).unwrap_err();
+        assert_eq!(
+            err,
+            DbError::TypeMismatch { column: "name".to_string(), expected: DataType::Text, got: Some(DataType::Int) }
+        );
+        assert_eq!(u.len(), 0);
+        assert_eq!(u.slot_count(), 0)
+    }
+
+    #[test]
+    fn delete_keeps_later_ids_stable() {
+        let mut u = seed();
+        
     }
 
     
