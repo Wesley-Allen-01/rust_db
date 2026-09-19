@@ -163,7 +163,11 @@ mod tests {
         let err = u.insert(vec![1.into(), 2.into(), true.into()]).unwrap_err();
         assert_eq!(
             err,
-            DbError::TypeMismatch { column: "name".to_string(), expected: DataType::Text, got: Some(DataType::Int) }
+            DbError::TypeMismatch {
+                column: "name".to_string(),
+                expected: DataType::Text,
+                got: Some(DataType::Int)
+            }
         );
         assert_eq!(u.len(), 0);
         assert_eq!(u.slot_count(), 0)
@@ -172,8 +176,45 @@ mod tests {
     #[test]
     fn delete_keeps_later_ids_stable() {
         let mut u = seed();
-        
+        assert!(u.delete(1));
+
+        assert_eq!(u.get(2).unwrap()[1], Value::Text("hannah".into()));
+        assert!(u.get(1).is_none());
     }
 
-    
+    #[test]
+    fn delete_is_idempotent() {
+        let mut u = seed();
+        assert!(u.delete(1));
+        assert!(!u.delete(1));
+        assert!(!u.delete(99));
+        assert_eq!(u.len(), 2);
+    }
+
+    #[test]
+    fn len_counts_live_rows_not_slots() {
+        let mut u = seed();
+        u.delete(1);
+        assert_eq!(u.len(), 2);
+        assert_eq!(u.slot_count(), 3);
+    }
+
+    #[test]
+    fn iteration_skips_tomb_stones() {
+        let mut u = seed();
+        u.delete(1);
+
+        let names: Vec<&str> = u.iter().map(|r| r[1].as_text().unwrap()).collect();
+        assert_eq!(names, vec!["ada", "hannah"]);
+
+        let ids: Vec<usize> = u.iter_with_ids().map(|(id, _)| id).collect();
+        assert_eq!(ids, vec![0, 2]);
+    }
+
+    #[test]
+    fn update_performs_modification_in_place() {
+        let mut u = seed();
+        assert_eq!(u.update(1, vec![1.into(), "jonny".into(), true.into()]), Ok(true));
+        
+    }
 }
