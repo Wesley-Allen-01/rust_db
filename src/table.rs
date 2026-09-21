@@ -214,7 +214,9 @@ mod tests {
     #[test]
     fn update_performs_modification_in_place() {
         let mut u = seed();
-        assert_eq!(u.update(1, vec![1.into(), "jonny".into(), true.into()]), Ok(true));
-        
+        assert_eq!(
+            u.update(1, vec![1.into(), "jonny".into(), true.into()]),
+            Ok(true)
+        );
     }
 }

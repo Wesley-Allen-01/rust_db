@@ -23,6 +23,14 @@ pub enum DbError {
     NoSuchColumn {
         name: String,
     },
+
+    NoSuchTable {
+        name: String,
+    },
+
+    TableAlreadyExists {
+        name: String,
+    },
 }
 
 impl fmt::Display for DbError {
@@ -54,6 +62,14 @@ impl fmt::Display for DbError {
 
             DbError::NoSuchColumn { name } => {
                 write!(f, "no such column `{name}`")
+            }
+
+            DbError::NoSuchTable { name } => {
+                write!(f, "no such table `{name}`")
+            }
+
+            DbError::TableAlreadyExists { name } => {
+                write!(f, "table `{name}` already exists")
             }
         }
     }
