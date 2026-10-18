@@ -1,6 +1,7 @@
 use crate::error::Result;
 use crate::schema::Schema;
 use crate::value::Value;
+use std::collections::BTreeMap;
 use std::ops::Index;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -36,8 +37,8 @@ impl Index<usize> for Row {
 pub struct Table {
     name: String,
     schema: Schema,
-    rows: Vec<Option<Row>>,
-    live_count: usize,
+    rows: BTreeMap<usize, Row>,
+    next_id: usize,
 }
 
 impl Table {
@@ -45,8 +46,8 @@ impl Table {
         Table {
             name: name.into(),
             schema,
-            rows: Vec::new(),
-            live_count: 0,
+            rows: BTreeMap::new(),
+            next_id: 0,
         }
     }
 
@@ -59,66 +60,48 @@ impl Table {
     }
 
     pub fn len(&self) -> usize {
-        self.live_count
+        self.rows.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.live_count == 0
-    }
-
-    pub fn slot_count(&self) -> usize {
-        self.rows.len()
+        self.rows.is_empty()
     }
 
     pub fn insert(&mut self, values: Vec<Value>) -> Result<usize> {
         self.schema.validate_row(&values)?;
 
-        let id = self.rows.len();
-        self.rows.push(Some(Row(values)));
-        self.live_count += 1;
+        // IDs only ever increase, so a deleted row's ID is never handed out again.
+        let id = self.next_id;
+        self.next_id += 1;
+        self.rows.insert(id, Row(values));
         Ok(id)
     }
 
     pub fn update(&mut self, id: usize, values: Vec<Value>) -> Result<bool> {
         self.schema.validate_row(&values)?;
-        match self.rows.get_mut(id) {
-            Some(slot @ Some(_)) => {
-                *slot = Some(Row(values));
+        match self.rows.get_mut(&id) {
+            Some(row) => {
+                *row = Row(values);
                 Ok(true)
             }
-            _ => Ok(false),
+            None => Ok(false),
         }
     }
 
     pub fn delete(&mut self, id: usize) -> bool {
-        match self.rows.get_mut(id) {
-            Some(slot) if slot.is_some() => {
-                *slot = None;
-                self.live_count -= 1;
-                true
-            }
-            _ => false,
-        }
+        self.rows.remove(&id).is_some()
     }
 
     pub fn get(&self, id: usize) -> Option<&Row> {
-        self.rows.get(id)?.as_ref()
+        self.rows.get(&id)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Row> + '_ {
-        self.rows.iter().flatten()
+        self.rows.values()
     }
 
     pub fn iter_with_ids(&self) -> impl Iterator<Item = (usize, &Row)> + '_ {
-        self.rows
-            .iter()
-            .enumerate()
-            .filter_map(|(id, slot)| slot.as_ref().map(|row| (id, row)))
-    }
-
-    pub fn compact(&mut self) {
-        self.rows.retain(|slot| slot.is_some());
-        self.live_count = self.rows.len();
+        self.rows.iter().map(|(&id, row)| (id, row))
     }
 }
 
@@ -170,7 +153,8 @@ mod tests {
             }
         );
         assert_eq!(u.len(), 0);
-        assert_eq!(u.slot_count(), 0)
+        // A rejected insert must not use up an ID.
+        assert_eq!(u.insert(vec![1.into(), "ada".into(), true.into()]), Ok(0));
     }
 
     #[test]
@@ -192,15 +176,25 @@ mod tests {
     }
 
     #[test]
-    fn len_counts_live_rows_not_slots() {
+    fn len_counts_live_rows() {
         let mut u = seed();
         u.delete(1);
         assert_eq!(u.len(), 2);
-        assert_eq!(u.slot_count(), 3);
     }
 
     #[test]
-    fn iteration_skips_tomb_stones() {
+    fn ids_are_never_reused() {
+        let mut u = seed();
+        assert!(u.delete(2));
+
+        let id = u.insert(vec![4.into(), "zoe".into(), true.into()]).unwrap();
+        assert_eq!(id, 3);
+        assert!(u.get(2).is_none());
+        assert_eq!(u.get(3).unwrap()[1], Value::Text("zoe".into()));
+    }
+
+    #[test]
+    fn iteration_skips_deleted_rows() {
         let mut u = seed();
         u.delete(1);
 
