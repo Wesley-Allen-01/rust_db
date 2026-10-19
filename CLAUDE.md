@@ -5,6 +5,19 @@ rust_db is a SQL database built for learning depth: a hand-written parser, execu
 - **Responses**: terse and plain. Lead with the result, use short sentences, and make every sentence carry information. The user wants to read them at a glance.
 - **Code**: readable on one pass. Small functions, plain names, the simplest approach that works. Comments explain *why*. Match the surrounding code.
 
+## Skills
+
+Use the Matt Pocock skills (`mattpocock-skills:*`) for every stage of work:
+
+- **Planning a milestone**: `grill-with-docs`
+- **Implementing**: `tdd`, test-first, against the seams in `docs/agents/testing.md`. Use `codebase-design` when a module's interface is in question.
+- **Before opening a PR**: `code-review` against `main`, then apply its findings. This is the refactor stage.
+- **PR body**: `pr`
+- **Red CI, a bug, or slowness**: `diagnosing-bugs`
+- **Open design question**: `prototype`. **Facts needed**: `research`.
+- **New domain terms or ADRs**: `domain-modeling`
+- **Editing agent docs** (this file, `docs/agents/`): `writing-for-agents`
+
 ## Orchestration
 
 When asked to work through issues or a milestone, follow `docs/agents/orchestration.md`. Parallelise wherever the dependency graph allows. Agents merge their own PRs once CI passes; there is no human review.

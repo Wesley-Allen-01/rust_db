@@ -13,10 +13,11 @@ How an orchestrating agent drives a milestone to completion. `gh` commands for s
 1. **Find the frontier.** The current milestone is the open parent issue with the lowest `milestone-N` label. Its frontier is every open `ready-for-agent` sub-issue with no open blockers and no assignee.
 2. **Dispatch in parallel.** Start one worker subagent per frontier issue, all at once, each in its own git worktree (`isolation: "worktree"`). Assign each issue to `@me` first. A worker:
    1. Reads the issue, `GLOSSARY.md` and the ADRs it touches.
-   2. Builds the slice test-first: unit tests plus `.slt` files for SQL behaviour.
-   3. Gets `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` passing locally.
-   4. Opens a PR whose body says `Closes #N`, then runs `gh pr merge --squash --auto`.
-   5. Finishes when the PR is merged. If CI fails, it fixes and pushes. If `main` has moved, it rebases onto `main` (or runs `gh pr update-branch`) and resolves conflicts.
+   2. Builds the slice with the `tdd` skill against the seams in `testing.md`, committing as it goes.
+   3. Runs the `code-review` skill against `main` and applies its findings, keeping tests green.
+   4. Gets `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` passing locally.
+   5. Opens a PR with a body written by the `pr` skill that includes `Closes #N`, then runs `gh pr merge --squash --auto`.
+   6. Finishes when the PR is merged. If CI fails, it uses `diagnosing-bugs`, then fixes and pushes. If `main` has moved, it rebases onto `main` (or runs `gh pr update-branch`) and resolves conflicts.
 3. **Repeat.** Each time a PR merges, recompute the frontier and dispatch any newly unblocked issues right away. Don't wait for the whole batch to finish.
 4. **Milestone done** when every sub-issue of the parent is closed. Close the parent, then stop and suggest the user start a `/grill-with-docs` session for the next milestone. Each milestone is designed only when it's reached.
 
