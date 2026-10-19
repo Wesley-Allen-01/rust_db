@@ -1,9 +1,10 @@
 //! The REPL binary: reads lines, runs Meta Commands and Statements, prints results.
 
 use rust_db::database::Database;
-use rust_db::repl::input::{Input, InputBuffer, execute_all};
+use rust_db::repl::input::{Input, InputBuffer};
 use rust_db::repl::meta::{MetaOutcome, run_meta};
 use rust_db::repl::render::render_output;
+use rust_db::repl::run::execute_all;
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 

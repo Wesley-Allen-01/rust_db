@@ -1,8 +1,5 @@
-//! Turns REPL input lines into Meta Commands and Statements, and runs the Statements.
+//! Turns REPL input lines into Meta Commands and Statements.
 
-use crate::database::Database;
-use crate::error::Result;
-use crate::execute::{Output, execute};
 use crate::lexer::{LexErrorKind, Token, tokenize};
 
 /// A complete piece of input, ready to run.
@@ -59,21 +56,6 @@ impl InputBuffer {
     fn in_open_string(&self) -> bool {
         tokenize(&self.text).is_err_and(|err| err.kind == LexErrorKind::UnterminatedString)
     }
-}
-
-/// Runs each Statement in the SQL in turn. Like psql, the first error skips
-/// the rest, so it is the last result.
-pub fn execute_all(db: &mut Database, sql: &str) -> Vec<Result<Output>> {
-    let mut results = Vec::new();
-    for statement in split_statements(sql) {
-        let result = execute(db, statement);
-        let failed = result.is_err();
-        results.push(result);
-        if failed {
-            break;
-        }
-    }
-    results
 }
 
 /// Splits complete input into its Statements, each ending at its `;`, as psql
@@ -238,19 +220,6 @@ mod tests {
             split_statements("SELECT 1; SELECT @"),
             vec!["SELECT 1; SELECT @"]
         );
-    }
-
-    #[test]
-    fn execute_all_stops_at_the_first_error() {
-        let mut db = Database::new();
-        let results = execute_all(
-            &mut db,
-            "CREATE TABLE a (id INT); SELECT x; CREATE TABLE b (id INT);",
-        );
-        assert_eq!(results.len(), 2);
-        assert!(results[0].is_ok());
-        assert!(results[1].is_err());
-        assert_eq!(db.table_names(), vec!["a"]);
     }
 
     #[test]
