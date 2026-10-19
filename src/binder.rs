@@ -6,11 +6,12 @@
 //! the Table instead, which does it for every Row it stores.
 
 use crate::ast::{
-    BinaryOp, CreateTable, Delete, DropTable, Expr, Insert, Select, SelectItem, Statement, UnaryOp,
-    Update,
+    BinaryOp, CreateTable, Delete, DropTable, Expr, Insert, OrderByItem, Select, SelectItem,
+    Statement, UnaryOp, Update,
 };
 use crate::database::Database;
 use crate::error::{DbError, Result};
+use crate::eval::eval;
 use crate::schema::{Column, ResultColumn, Schema};
 use crate::table::Table;
 use crate::value::{DataType, Value};
@@ -65,6 +66,20 @@ pub struct BoundSelect {
     pub exprs: Vec<BoundExpr>,
     /// One per expression, in the same order.
     pub columns: Vec<ResultColumn>,
+    /// The ORDER BY keys, most significant first. Each reads the same Rows
+    /// as the SELECT list, not its output.
+    pub order_by: Vec<SortKey>,
+    /// The most Rows to return, if there is a LIMIT.
+    pub limit: Option<usize>,
+    /// How many Rows to skip first: 0 without OFFSET.
+    pub offset: usize,
+}
+
+/// One ORDER BY key. NULLs sort last for ASC and first for DESC, as in Postgres.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SortKey {
+    pub expr: BoundExpr,
+    pub descending: bool,
 }
 
 /// An UPDATE of a Table that exists. Every expression, WHERE included, reads
@@ -292,12 +307,96 @@ fn bind_select(db: &Database, select: Select) -> Result<BoundStatement> {
             }
         }
     }
+    let order_by = select
+        .order_by
+        .into_iter()
+        .map(|item| bind_sort_key(item, &exprs, &columns, scope))
+        .collect::<Result<_>>()?;
     Ok(BoundStatement::Select(BoundSelect {
         from: table.map(|table| table.name().to_string()),
         predicate: bind_predicate(select.predicate, scope)?,
         exprs,
         columns,
+        order_by,
+        limit: bind_count("LIMIT", select.limit)?,
+        offset: bind_count("OFFSET", select.offset)?.unwrap_or(0),
     }))
+}
+
+/// Binds the count of a LIMIT or OFFSET `clause`: a constant INT that is not
+/// negative. Being constant, it is evaluated here, once.
+fn bind_count(clause: &'static str, count: Option<Expr>) -> Result<Option<usize>> {
+    let Some(count) = count else {
+        return Ok(None);
+    };
+    // No scope: a constant can't read a Column.
+    let (count, ty) = bind_expr(count, None)?;
+    if ty != Some(DataType::Int) {
+        return Err(DbError::CountNotInt { clause, got: ty });
+    }
+    match eval(&count, &[])? {
+        Value::Int(n) if n < 0 => Err(DbError::NegativeCount { clause }),
+        // An i64 that is not negative always fits a usize on 64-bit targets.
+        Value::Int(n) => Ok(Some(usize::try_from(n).unwrap_or(usize::MAX))),
+        // An INT expression such as `NULL + 1` can still evaluate to NULL.
+        _ => Err(DbError::CountNotInt { clause, got: None }),
+    }
+}
+
+/// As in Postgres, a bare INT is a position in the SELECT list, and a bare
+/// name that is a Result Set Column's name sorts by that Column's expression, so
+/// an alias works as a key. Any other key is an expression over the input
+/// Columns.
+fn bind_sort_key(
+    item: OrderByItem,
+    exprs: &[BoundExpr],
+    columns: &[ResultColumn],
+    scope: Option<&Schema>,
+) -> Result<SortKey> {
+    let expr = match &item.expr {
+        Expr::Literal(Value::Int(position)) => select_list_at(*position, exprs)?,
+        Expr::Column(name) => match select_list_expr(name, exprs, columns)? {
+            Some(expr) => expr,
+            None => bind_expr(item.expr, scope)?.0,
+        },
+        _ => bind_expr(item.expr, scope)?.0,
+    };
+    Ok(SortKey {
+        expr,
+        descending: item.descending,
+    })
+}
+
+/// The expression of the Result Set Column at `position`, counting from 1.
+fn select_list_at(position: i64, exprs: &[BoundExpr]) -> Result<BoundExpr> {
+    usize::try_from(position)
+        .ok()
+        .and_then(|position| exprs.get(position.checked_sub(1)?))
+        .cloned()
+        .ok_or(DbError::NoSuchPosition { position })
+}
+
+/// The expression of the Result Set Column called `name`, if there is one.
+/// Several such Columns are fine only if they compute the same thing.
+fn select_list_expr(
+    name: &str,
+    exprs: &[BoundExpr],
+    columns: &[ResultColumn],
+) -> Result<Option<BoundExpr>> {
+    let mut matches = columns
+        .iter()
+        .zip(exprs)
+        .filter(|(column, _)| column.name.eq_ignore_ascii_case(name))
+        .map(|(_, expr)| expr);
+    let Some(first) = matches.next() else {
+        return Ok(None);
+    };
+    if matches.any(|other| other != first) {
+        return Err(DbError::AmbiguousColumn {
+            name: name.to_string(),
+        });
+    }
+    Ok(Some(first.clone()))
 }
 
 /// `*` expands to every Column of the FROM Table, in Schema order.

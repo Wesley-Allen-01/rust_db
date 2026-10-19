@@ -73,6 +73,27 @@ pub enum DbError {
     DivisionByZero,
 
     NotYetSupported,
+
+    /// An ORDER BY name that matches several different output Columns.
+    AmbiguousColumn {
+        name: String,
+    },
+
+    /// An ORDER BY position outside the SELECT list.
+    NoSuchPosition {
+        position: i64,
+    },
+
+    /// A LIMIT or OFFSET count whose Data Type isn't INT. `None` is NULL.
+    CountNotInt {
+        clause: &'static str,
+        got: Option<DataType>,
+    },
+
+    /// A LIMIT or OFFSET count below zero.
+    NegativeCount {
+        clause: &'static str,
+    },
 }
 
 /// A Data Type for an error message, where `None` means NULL.
@@ -153,6 +174,23 @@ impl fmt::Display for DbError {
 
             DbError::NotYetSupported => {
                 write!(f, "not yet supported")
+            }
+
+            DbError::AmbiguousColumn { name } => {
+                write!(f, "column name `{name}` is ambiguous")
+            }
+
+            DbError::NoSuchPosition { position } => {
+                write!(f, "ORDER BY position {position} is not in the SELECT list")
+            }
+
+            DbError::CountNotInt { clause, got } => {
+                let got = type_name(got);
+                write!(f, "{clause} must be INT, got {got}")
+            }
+
+            DbError::NegativeCount { clause } => {
+                write!(f, "{clause} must not be negative")
             }
         }
     }

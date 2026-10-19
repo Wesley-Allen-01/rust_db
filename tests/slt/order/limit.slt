@@ -1,0 +1,134 @@
+# LIMIT n keeps at most n Rows; OFFSET m skips the first m. Both apply after
+# ORDER BY.
+
+statement ok
+CREATE TABLE t (id INT);
+
+statement ok
+INSERT INTO t VALUES (3), (1), (4), (5), (2);
+
+query I
+SELECT id FROM t ORDER BY id LIMIT 2;
+----
+1
+2
+
+query I
+SELECT id FROM t ORDER BY id LIMIT 2 OFFSET 1;
+----
+2
+3
+
+# OFFSET works on its own.
+query I
+SELECT id FROM t ORDER BY id DESC OFFSET 3;
+----
+2
+1
+
+# Without ORDER BY, LIMIT takes Rows in Row ID order.
+query I
+SELECT id FROM t LIMIT 3;
+----
+3
+1
+4
+
+# LIMIT 0 gives no Rows.
+query I
+SELECT id FROM t LIMIT 0;
+----
+
+# LIMIT larger than the row count gives every Row.
+query I
+SELECT id FROM t ORDER BY id LIMIT 100;
+----
+1
+2
+3
+4
+5
+
+# OFFSET 0 skips nothing.
+query I
+SELECT id FROM t ORDER BY id LIMIT 1 OFFSET 0;
+----
+1
+
+# OFFSET at or past the row count gives no Rows.
+query I
+SELECT id FROM t OFFSET 5;
+----
+
+query I
+SELECT id FROM t ORDER BY id LIMIT 2 OFFSET 100;
+----
+
+# Rows past the limit are never projected, so id 3's division by zero
+# never runs.
+query I
+SELECT 1 / (id - 3) FROM t ORDER BY id LIMIT 2;
+----
+0
+-1
+
+# LIMIT applies after WHERE.
+query I
+SELECT id FROM t WHERE id > 2 ORDER BY id LIMIT 2;
+----
+3
+4
+
+# Without FROM there is one Row to limit.
+query I
+SELECT 1 LIMIT 1;
+----
+1
+
+query I
+SELECT 1 OFFSET 1;
+----
+
+# A constant expression is allowed, as in Postgres.
+query I
+SELECT id FROM t ORDER BY id LIMIT 1 + 1;
+----
+1
+2
+
+# n and m must be non-negative INTs.
+statement error LIMIT must not be negative
+SELECT id FROM t LIMIT -1;
+
+statement error OFFSET must not be negative
+SELECT id FROM t OFFSET -1;
+
+statement error LIMIT must be INT, got FLOAT
+SELECT id FROM t LIMIT 1.5;
+
+statement error OFFSET must be INT, got TEXT
+SELECT id FROM t OFFSET 'a';
+
+statement error LIMIT must be INT, got NULL
+SELECT id FROM t LIMIT NULL;
+
+# An INT expression that evaluates to NULL is no count either.
+statement error LIMIT must be INT, got NULL
+SELECT id FROM t LIMIT NULL + 1;
+
+# They are constants, so they can't read a Column.
+statement error no such column `id`
+SELECT id FROM t LIMIT id;
+
+statement error division by zero
+SELECT id FROM t LIMIT 1 / 0;
+
+# LIMIT comes before OFFSET, and ORDER BY before both.
+statement error line 1, col 27
+SELECT id FROM t OFFSET 1 LIMIT 1;
+
+statement error line 1, col 26
+SELECT id FROM t LIMIT 1 ORDER BY id;
+
+statement error line 1, col 24: expected BY
+SELECT id FROM t ORDER id;

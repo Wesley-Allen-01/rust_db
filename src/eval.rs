@@ -9,6 +9,7 @@ use crate::ast::{BinaryOp, UnaryOp};
 use crate::binder::BoundExpr;
 use crate::error::{DbError, Result};
 use crate::value::{DataType, Value};
+use std::cmp::Ordering;
 
 /// Evaluates `expr` against `row`, the Row its Column references read from.
 pub fn eval(expr: &BoundExpr, row: &[Value]) -> Result<Value> {
@@ -72,14 +73,7 @@ fn or(left: Option<bool>, right: Option<bool>) -> Value {
 
 /// SQL comparison of two non-NULL Values of the same Data Type.
 fn compare(op: BinaryOp, left: &Value, right: &Value) -> bool {
-    let ordering = match (left, right) {
-        (Value::Int(a), Value::Int(b)) => a.cmp(b),
-        // Floats are always finite (see float_arithmetic), so never NaN.
-        (Value::Float(a), Value::Float(b)) => a.partial_cmp(b).expect("FLOAT is never NaN"),
-        (Value::Text(a), Value::Text(b)) => a.cmp(b),
-        (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
-        _ => unreachable!("binder let through {left:?} {op} {right:?}"),
-    };
+    let ordering = order(left, right);
     match op {
         BinaryOp::Eq => ordering.is_eq(),
         BinaryOp::NotEq => ordering.is_ne(),
@@ -88,6 +82,29 @@ fn compare(op: BinaryOp, left: &Value, right: &Value) -> bool {
         BinaryOp::Gt => ordering.is_gt(),
         BinaryOp::GtEq => ordering.is_ge(),
         _ => unreachable!("{op} is not a comparison"),
+    }
+}
+
+/// How two non-NULL Values of one Data Type order. TEXT orders by byte.
+fn order(left: &Value, right: &Value) -> Ordering {
+    match (left, right) {
+        (Value::Int(a), Value::Int(b)) => a.cmp(b),
+        // Floats are always finite (see float_arithmetic), so never NaN.
+        (Value::Float(a), Value::Float(b)) => a.partial_cmp(b).expect("FLOAT is never NaN"),
+        (Value::Text(a), Value::Text(b)) => a.cmp(b),
+        (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
+        _ => unreachable!("binder let through {left:?} against {right:?}"),
+    }
+}
+
+/// Ascending order with NULL after every Value. Reversed for DESC, this puts
+/// NULLs first, as Postgres does.
+pub fn order_nulls_last(a: &Value, b: &Value) -> Ordering {
+    match (a, b) {
+        (Value::Null, Value::Null) => Ordering::Equal,
+        (Value::Null, _) => Ordering::Greater,
+        (_, Value::Null) => Ordering::Less,
+        (a, b) => order(a, b),
     }
 }
 

@@ -46,12 +46,24 @@ pub struct DropTable {
     pub if_exists: bool,
 }
 
-/// `SELECT item, ... [FROM table] [WHERE expr]`.
+/// `SELECT item, ... [FROM table] [WHERE expr] [ORDER BY key, ...]
+/// [LIMIT expr] [OFFSET expr]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Select {
     pub items: Vec<SelectItem>,
     pub from: Option<String>,
     pub predicate: Option<Expr>,
+    /// Empty without ORDER BY.
+    pub order_by: Vec<OrderByItem>,
+    pub limit: Option<Expr>,
+    pub offset: Option<Expr>,
+}
+
+/// One ORDER BY key: `expr [ASC | DESC]`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderByItem {
+    pub expr: Expr,
+    pub descending: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

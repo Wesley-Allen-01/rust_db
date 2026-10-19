@@ -1,11 +1,12 @@
 //! The Operators a Plan is built from (ADR-0002). Each one yields Rows on
 //! demand, pulling from its children.
 
-use crate::binder::BoundExpr;
+use crate::binder::{BoundExpr, SortKey};
 use crate::error::Result;
-use crate::eval::eval;
+use crate::eval::{eval, order_nulls_last};
 use crate::table::{Row, RowId, Table};
 use crate::value::Value;
+use std::cmp::Ordering;
 
 /// A Row as it flows through a Plan.
 ///
@@ -124,6 +125,111 @@ impl Operator for Project<'_> {
     }
 }
 
+/// Yields its child's Rows ordered by the sort keys. It reads every Row
+/// before yielding the first. Rows that tie on every key keep their input
+/// order.
+pub struct Sort<'a> {
+    child: Box<dyn Operator + 'a>,
+    keys: Vec<SortKey>,
+    /// `None` until the child has been read and sorted.
+    sorted: Option<std::vec::IntoIter<PlanRow>>,
+}
+
+impl<'a> Sort<'a> {
+    pub fn new(child: Box<dyn Operator + 'a>, keys: Vec<SortKey>) -> Self {
+        Sort {
+            child,
+            keys,
+            sorted: None,
+        }
+    }
+
+    /// Reads every Row of the child and sorts them. Each Row's key Values
+    /// are computed once, up front, so an error in a key fails the Sort.
+    fn sort_child(&mut self) -> Result<std::vec::IntoIter<PlanRow>> {
+        let mut keyed = Vec::new();
+        while let Some(row) = self.child.next()? {
+            let key_values = self
+                .keys
+                .iter()
+                .map(|key| eval(&key.expr, &row.values))
+                .collect::<Result<Vec<Value>>>()?;
+            keyed.push((key_values, row));
+        }
+        // `sort_by` is stable, which keeps ties in input order.
+        keyed.sort_by(|(a, _), (b, _)| self.compare_keys(a, b));
+        let rows: Vec<PlanRow> = keyed.into_iter().map(|(_, row)| row).collect();
+        Ok(rows.into_iter())
+    }
+
+    fn compare_keys(&self, a: &[Value], b: &[Value]) -> Ordering {
+        self.keys
+            .iter()
+            .zip(a.iter().zip(b))
+            .map(|(key, (a, b))| {
+                let ordering = order_nulls_last(a, b);
+                if key.descending {
+                    ordering.reverse()
+                } else {
+                    ordering
+                }
+            })
+            .find(|ordering| ordering.is_ne())
+            .unwrap_or(Ordering::Equal)
+    }
+}
+
+impl Operator for Sort<'_> {
+    fn next(&mut self) -> Result<Option<PlanRow>> {
+        if self.sorted.is_none() {
+            self.sorted = Some(self.sort_child()?);
+        }
+        Ok(self.sorted.as_mut().and_then(Iterator::next))
+    }
+}
+
+/// Skips the first `offset` Rows of its child, then yields at most `limit`
+/// of the rest (all of them without a limit).
+pub struct Limit<'a> {
+    child: Box<dyn Operator + 'a>,
+    /// Rows still to skip.
+    offset: usize,
+    /// Rows still to yield, or `None` for no limit.
+    remaining: Option<usize>,
+}
+
+impl<'a> Limit<'a> {
+    pub fn new(child: Box<dyn Operator + 'a>, limit: Option<usize>, offset: usize) -> Self {
+        Limit {
+            child,
+            offset,
+            remaining: limit,
+        }
+    }
+}
+
+impl Operator for Limit<'_> {
+    fn next(&mut self) -> Result<Option<PlanRow>> {
+        // Checked first, so a spent limit stops pulling from the child.
+        if self.remaining == Some(0) {
+            return Ok(None);
+        }
+        while self.offset > 0 {
+            if self.child.next()?.is_none() {
+                return Ok(None);
+            }
+            self.offset -= 1;
+        }
+        let row = self.child.next()?;
+        if row.is_some()
+            && let Some(remaining) = &mut self.remaining
+        {
+            *remaining -= 1;
+        }
+        Ok(row)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,6 +328,71 @@ mod tests {
         assert_eq!(
             drain(Project::new(rows, exprs)),
             vec![row(Some(3), vec![Value::Text("a".into()), Value::Int(40)])]
+        );
+    }
+
+    fn row_ids_and_first_values(rows: &[PlanRow]) -> Vec<(Option<RowId>, Value)> {
+        rows.iter()
+            .map(|row| (row.row_id, row.values[0].clone()))
+            .collect()
+    }
+
+    #[test]
+    fn sort_orders_rows_by_key_and_keeps_their_row_ids() {
+        let keys = vec![SortKey {
+            expr: BoundExpr::Column(0),
+            descending: true,
+        }];
+        let rows = child(vec![
+            row(Some(0), vec![Value::Int(1)]),
+            row(Some(1), vec![Value::Null]),
+            row(Some(2), vec![Value::Int(3)]),
+        ]);
+        assert_eq!(
+            row_ids_and_first_values(&drain(Sort::new(rows, keys))),
+            vec![
+                (Some(1), Value::Null),
+                (Some(2), Value::Int(3)),
+                (Some(0), Value::Int(1)),
+            ]
+        );
+    }
+
+    #[test]
+    fn limit_skips_the_offset_then_keeps_row_ids() {
+        let rows = child(
+            (0..5)
+                .map(|n| row(Some(n), vec![Value::Int(n as i64)]))
+                .collect(),
+        );
+        assert_eq!(
+            row_ids_and_first_values(&drain(Limit::new(rows, Some(2), 1))),
+            vec![(Some(1), Value::Int(1)), (Some(2), Value::Int(2))]
+        );
+    }
+
+    /// A child that fails if pulled more than `allowed` times.
+    struct Strict {
+        allowed: usize,
+    }
+
+    impl Operator for Strict {
+        fn next(&mut self) -> Result<Option<PlanRow>> {
+            assert!(self.allowed > 0, "pulled past the limit");
+            self.allowed -= 1;
+            Ok(Some(row(None, vec![Value::Int(0)])))
+        }
+    }
+
+    #[test]
+    fn limit_stops_pulling_from_its_child_once_the_limit_is_reached() {
+        assert_eq!(
+            drain(Limit::new(Box::new(Strict { allowed: 0 }), Some(0), 0)).len(),
+            0
+        );
+        assert_eq!(
+            drain(Limit::new(Box::new(Strict { allowed: 3 }), Some(2), 1)).len(),
+            2
         );
     }
 }

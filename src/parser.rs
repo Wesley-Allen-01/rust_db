@@ -4,8 +4,8 @@
 //! climbing (Pratt parsing). Hand-written per ADR-0001.
 
 use crate::ast::{
-    BinaryOp, ColumnDef, CreateTable, Delete, DropTable, Expr, Insert, Select, SelectItem,
-    Statement, UnaryOp, Update,
+    BinaryOp, ColumnDef, CreateTable, Delete, DropTable, Expr, Insert, OrderByItem, Select,
+    SelectItem, Statement, UnaryOp, Update,
 };
 use crate::error::{DbError, Result};
 use crate::lexer::{Keyword, Position, PositionedToken, Token, tokenize};
@@ -145,11 +145,50 @@ impl Parser {
         } else {
             None
         };
+        let order_by = if self.eat_keyword(Keyword::Order) {
+            self.expect_keyword(Keyword::By, "expected BY")?;
+            self.order_by_items()?
+        } else {
+            Vec::new()
+        };
+        let limit = self.clause(Keyword::Limit)?;
+        let offset = self.clause(Keyword::Offset)?;
         Ok(Select {
             items,
             from,
             predicate,
+            order_by,
+            limit,
+            offset,
         })
+    }
+
+    fn order_by_items(&mut self) -> Result<Vec<OrderByItem>> {
+        let mut items = vec![self.order_by_item()?];
+        while self.eat(&Token::Comma) {
+            items.push(self.order_by_item()?);
+        }
+        Ok(items)
+    }
+
+    fn order_by_item(&mut self) -> Result<OrderByItem> {
+        let expr = self.expr()?;
+        let descending = if self.eat_keyword(Keyword::Desc) {
+            true
+        } else {
+            self.eat_keyword(Keyword::Asc);
+            false
+        };
+        Ok(OrderByItem { expr, descending })
+    }
+
+    /// `keyword expr`, if the next token is `keyword`.
+    fn clause(&mut self, keyword: Keyword) -> Result<Option<Expr>> {
+        if self.eat_keyword(keyword) {
+            Ok(Some(self.expr()?))
+        } else {
+            Ok(None)
+        }
     }
 
     /// The part of a CREATE TABLE after the `CREATE` keyword.
