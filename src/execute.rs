@@ -123,6 +123,9 @@ mod tests {
 
     #[test]
     fn lexer_errors_surface_as_syntax_errors() {
-        assert_eq!(error("SELECT \"x\""), "line 1, col 8: double-quoted identifiers are not supported");
+        assert_eq!(
+            error("SELECT \"x\""),
+            "line 1, col 8: double-quoted identifiers are not supported"
+        );
     }
 }

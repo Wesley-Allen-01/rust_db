@@ -51,14 +51,12 @@ impl Project {
 
 impl Operator for Project {
     fn next(&mut self) -> Result<Option<Row>> {
-        let Some(row) = self.child.next()? else {
+        // No expression reads the child's Row until Column references can be
+        // bound (they need FROM); the Row only drives how often we emit.
+        if self.child.next()?.is_none() {
             return Ok(None);
-        };
-        let projected = self
-            .exprs
-            .iter()
-            .map(|expr| eval(expr, &row))
-            .collect::<Result<Row>>()?;
+        }
+        let projected = self.exprs.iter().map(eval).collect::<Result<Row>>()?;
         Ok(Some(projected))
     }
 }

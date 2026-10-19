@@ -1,5 +1,6 @@
-//! Evaluates bound expressions against a Row, with SQL semantics: three-valued
-//! logic, NULL propagation, checked integer arithmetic.
+//! Evaluates bound expressions with SQL semantics: three-valued logic, NULL
+//! propagation, checked integer arithmetic. Once Column references can be
+//! bound, `eval` will also take the Row they read from.
 //!
 //! The binder has already checked Data Types and inserted every Coercion, so
 //! both operands of a binary operator always hold the same kind of Value (or
@@ -10,19 +11,17 @@ use crate::binder::BoundExpr;
 use crate::error::{DbError, Result};
 use crate::value::Value;
 
-pub fn eval(expr: &BoundExpr, row: &[Value]) -> Result<Value> {
+pub fn eval(expr: &BoundExpr) -> Result<Value> {
     match expr {
         BoundExpr::Literal(value) => Ok(value.clone()),
-        BoundExpr::ToFloat(operand) => Ok(match eval(operand, row)? {
+        BoundExpr::ToFloat(operand) => Ok(match eval(operand)? {
             Value::Int(i) => Value::Float(i as f64),
             other => other,
         }),
-        BoundExpr::Unary { op, operand } => unary(*op, eval(operand, row)?),
-        BoundExpr::Binary { op, left, right } => {
-            binary(*op, eval(left, row)?, eval(right, row)?)
-        }
+        BoundExpr::Unary { op, operand } => unary(*op, eval(operand)?),
+        BoundExpr::Binary { op, left, right } => binary(*op, eval(left)?, eval(right)?),
         BoundExpr::IsNull { operand, negated } => {
-            let is_null = eval(operand, row)?.is_null();
+            let is_null = eval(operand)?.is_null();
             Ok(Value::Bool(is_null != *negated))
         }
     }
@@ -31,9 +30,10 @@ pub fn eval(expr: &BoundExpr, row: &[Value]) -> Result<Value> {
 fn unary(op: UnaryOp, value: Value) -> Result<Value> {
     match (op, value) {
         (_, Value::Null) => Ok(Value::Null),
-        (UnaryOp::Neg, Value::Int(i)) => {
-            i.checked_neg().map(Value::Int).ok_or(DbError::IntegerOverflow)
-        }
+        (UnaryOp::Neg, Value::Int(i)) => i
+            .checked_neg()
+            .map(Value::Int)
+            .ok_or(DbError::IntegerOverflow),
         (UnaryOp::Neg, Value::Float(x)) => Ok(Value::Float(-x)),
         (UnaryOp::Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
         (op, value) => unreachable!("binder let through {op} {value:?}"),

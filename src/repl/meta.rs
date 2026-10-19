@@ -72,7 +72,6 @@ mod tests {
     use super::*;
     use crate::schema::{Column, Schema};
 
-
     #[test]
     fn quit_command_quits() {
         assert_eq!(run_meta(&Database::new(), "\\q"), Ok(MetaOutcome::Quit));

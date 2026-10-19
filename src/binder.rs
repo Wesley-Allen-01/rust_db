@@ -129,9 +129,7 @@ fn bind_binary(op: BinaryOp, left: Expr, right: Expr) -> Result<(BoundExpr, Expr
     let both = |data_type| is(left_ty, data_type) && is(right_ty, data_type);
 
     let (left, right, ty) = match op {
-        BinaryOp::And | BinaryOp::Or if both(DataType::Bool) => {
-            (left, right, Some(DataType::Bool))
-        }
+        BinaryOp::And | BinaryOp::Or if both(DataType::Bool) => (left, right, Some(DataType::Bool)),
         BinaryOp::Concat if both(DataType::Text) => (left, right, Some(DataType::Text)),
         BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod
             if is_numeric(left_ty) && is_numeric(right_ty) =>
