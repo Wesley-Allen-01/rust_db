@@ -1,0 +1,136 @@
+//! Turns SQL text into tokens tagged with their line/column position.
+//! Hand-written per ADR-0001; depends on nothing else in the crate.
+
+use std::fmt;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Token {
+    Keyword(Keyword),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Keyword {
+    Select,
+}
+
+impl Keyword {
+    fn from_word(word: &str) -> Option<Keyword> {
+        match word.to_ascii_uppercase().as_str() {
+            "SELECT" => Some(Keyword::Select),
+            _ => None,
+        }
+    }
+}
+
+/// 1-based line and column of a token's first character.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Position {
+    pub line: usize,
+    pub col: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Spanned {
+    pub token: Token,
+    pub pos: Position,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LexError {
+    pub pos: Position,
+}
+
+impl fmt::Display for LexError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "line {}, col {}", self.pos.line, self.pos.col)
+    }
+}
+
+impl std::error::Error for LexError {}
+
+pub fn tokenize(sql: &str) -> Result<Vec<Spanned>, LexError> {
+    Lexer::new(sql).run()
+}
+
+struct Lexer {
+    chars: Vec<char>,
+    i: usize,
+    line: usize,
+    col: usize,
+}
+
+impl Lexer {
+    fn new(sql: &str) -> Lexer {
+        Lexer {
+            chars: sql.chars().collect(),
+            i: 0,
+            line: 1,
+            col: 1,
+        }
+    }
+
+    fn run(mut self) -> Result<Vec<Spanned>, LexError> {
+        let mut out = Vec::new();
+        while let Some(c) = self.peek() {
+            if c.is_whitespace() {
+                self.bump();
+                continue;
+            }
+            let pos = self.pos();
+            let token = self.word();
+            out.push(Spanned { token, pos });
+        }
+        Ok(out)
+    }
+
+    fn word(&mut self) -> Token {
+        let mut word = String::new();
+        while let Some(c) = self.peek().filter(|c| c.is_alphanumeric() || *c == '_') {
+            word.push(c);
+            self.bump();
+        }
+        Token::Keyword(Keyword::from_word(&word).unwrap())
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.chars.get(self.i).copied()
+    }
+
+    fn pos(&self) -> Position {
+        Position {
+            line: self.line,
+            col: self.col,
+        }
+    }
+
+    fn bump(&mut self) {
+        if self.peek() == Some('\n') {
+            self.line += 1;
+            self.col = 1;
+        } else {
+            self.col += 1;
+        }
+        self.i += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tokens(sql: &str) -> Vec<Token> {
+        tokenize(sql)
+            .expect("should lex")
+            .into_iter()
+            .map(|t| t.token)
+            .collect()
+    }
+
+    #[test]
+    fn keywords_are_case_insensitive() {
+        assert_eq!(
+            tokens("SELECT select SeLeCt"),
+            vec![Token::Keyword(Keyword::Select); 3]
+        );
+    }
+}
