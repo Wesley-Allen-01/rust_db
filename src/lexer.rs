@@ -122,11 +122,20 @@ pub struct Spanned {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LexError {
     pub pos: Position,
+    pub kind: LexErrorKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LexErrorKind {
+    UnexpectedChar(char),
 }
 
 impl fmt::Display for LexError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "line {}, col {}", self.pos.line, self.pos.col)
+        write!(f, "line {}, col {}: ", self.pos.line, self.pos.col)?;
+        match self.kind {
+            LexErrorKind::UnexpectedChar(c) => write!(f, "unexpected character '{c}'"),
+        }
     }
 }
 
@@ -164,7 +173,7 @@ impl Lexer {
             let token = if c.is_alphabetic() || c == '_' {
                 self.word()
             } else {
-                self.symbol(c)
+                self.symbol(c, pos)?
             };
             out.push(Spanned { token, pos });
         }
@@ -183,9 +192,9 @@ impl Lexer {
         }
     }
 
-    fn symbol(&mut self, c: char) -> Token {
+    fn symbol(&mut self, c: char, pos: Position) -> Result<Token, LexError> {
         self.bump();
-        match c {
+        let token = match c {
             '+' => Token::Plus,
             '-' => Token::Minus,
             '*' => Token::Star,
@@ -203,8 +212,14 @@ impl Lexer {
             '>' if self.eat('=') => Token::GtEq,
             '>' => Token::Gt,
             '|' if self.eat('|') => Token::Concat,
-            _ => unimplemented!(),
-        }
+            _ => {
+                return Err(LexError {
+                    pos,
+                    kind: LexErrorKind::UnexpectedChar(c),
+                });
+            }
+        };
+        Ok(token)
     }
 
     /// Consumes the next character if it is `expected`.
@@ -303,6 +318,29 @@ mod tests {
                 Ident("e".into()),
             ]
         );
+    }
+
+    fn error(sql: &str) -> LexError {
+        tokenize(sql).expect_err("should fail to lex")
+    }
+
+    fn at(line: usize, col: usize) -> Position {
+        Position { line, col }
+    }
+
+    #[test]
+    fn rejects_an_unexpected_character() {
+        let err = error("select a,\n  @x");
+        assert_eq!(err.kind, LexErrorKind::UnexpectedChar('@'));
+        assert_eq!(err.pos, at(2, 3));
+        assert_eq!(err.to_string(), "line 2, col 3: unexpected character '@'");
+    }
+
+    #[test]
+    fn rejects_a_lone_pipe() {
+        let err = error("a | b");
+        assert_eq!(err.kind, LexErrorKind::UnexpectedChar('|'));
+        assert_eq!(err.pos, at(1, 3));
     }
 
     #[test]
