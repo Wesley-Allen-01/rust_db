@@ -5,3 +5,4 @@ pub mod lexer;
 pub mod schema;
 pub mod table;
 pub mod value;
+pub mod repl;
