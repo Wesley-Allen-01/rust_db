@@ -1,5 +1,5 @@
 use crate::error::{DbError, Result};
-use crate::schema::{self, Schema};
+use crate::schema::Schema;
 use crate::table::Table;
 use std::collections::HashMap;
 
@@ -88,7 +88,7 @@ impl Database {
 mod tests {
     use super::*;
     use crate::schema::Column;
-    use crate::value::{DataType, Value};
+    use crate::value::DataType;
 
     pub fn users_schema() -> Schema {
         Schema::new(vec![

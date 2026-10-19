@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn type_of_reports_variant() {
         assert_eq!(Value::Int(1).type_of(), Some(DataType::Int));
-        assert_eq!(Value::Float(3.14).type_of(), Some(DataType::Float));
+        assert_eq!(Value::Float(2.5).type_of(), Some(DataType::Float));
         assert_eq!(Value::Null.type_of(), None);
     }
 
