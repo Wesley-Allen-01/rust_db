@@ -57,7 +57,7 @@ pub struct BoundSelect {
     /// The Table's name as stored, whatever case the query used.
     pub from: Option<String>,
     /// The WHERE, known to be BOOL (or NULL).
-    pub filter: Option<BoundExpr>,
+    pub predicate: Option<BoundExpr>,
     /// The SELECT list, with `*` expanded.
     pub exprs: Vec<BoundExpr>,
     /// One per expression, in the same order.
@@ -220,11 +220,9 @@ fn bind_select(db: &Database, select: Select) -> Result<BoundStatement> {
     for item in select.items {
         match item {
             SelectItem::Wildcard => {
-                let schema = scope.ok_or(DbError::WildcardWithoutTable)?;
-                for (index, column) in schema.columns().iter().enumerate() {
-                    exprs.push(BoundExpr::Column(index));
-                    columns.push(ResultColumn::new(column.name(), column.data_type()));
-                }
+                let (wildcard_exprs, wildcard_columns) = bind_wildcard(scope)?;
+                exprs.extend(wildcard_exprs);
+                columns.extend(wildcard_columns);
             }
             SelectItem::Expr { expr, alias } => {
                 let (expr, column) = bind_select_expr(expr, alias, scope)?;
@@ -235,20 +233,32 @@ fn bind_select(db: &Database, select: Select) -> Result<BoundStatement> {
     }
     Ok(BoundStatement::Select(BoundSelect {
         from: table.map(|table| table.name().to_string()),
-        filter: bind_filter(select.filter, scope)?,
+        predicate: bind_predicate(select.predicate, scope)?,
         exprs,
         columns,
     }))
 }
 
+/// `*` expands to every Column of the FROM Table, in Schema order.
+fn bind_wildcard(scope: Option<&Schema>) -> Result<(Vec<BoundExpr>, Vec<ResultColumn>)> {
+    let schema = scope.ok_or(DbError::WildcardWithoutTable)?;
+    let exprs = (0..schema.len()).map(BoundExpr::Column).collect();
+    let columns = schema
+        .columns()
+        .iter()
+        .map(|column| ResultColumn::new(column.name(), column.data_type()))
+        .collect();
+    Ok((exprs, columns))
+}
+
 /// Binds a WHERE, which must be BOOL. NULL is allowed: it drops every Row.
-fn bind_filter(filter: Option<Expr>, scope: Option<&Schema>) -> Result<Option<BoundExpr>> {
-    let Some(filter) = filter else {
+fn bind_predicate(predicate: Option<Expr>, scope: Option<&Schema>) -> Result<Option<BoundExpr>> {
+    let Some(predicate) = predicate else {
         return Ok(None);
     };
-    match bind_expr(filter, scope)? {
+    match bind_expr(predicate, scope)? {
         (_, Some(ty)) if ty != DataType::Bool => Err(DbError::WhereNotBool { got: ty }),
-        (filter, _) => Ok(Some(filter)),
+        (predicate, _) => Ok(Some(predicate)),
     }
 }
 

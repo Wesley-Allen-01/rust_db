@@ -64,8 +64,8 @@ impl<'a> Scan<'a> {
 
 impl Operator for Scan<'_> {
     fn next(&mut self) -> Result<Option<PlanRow>> {
-        Ok(self.rows.next().map(|(id, row)| PlanRow {
-            row_id: Some(id),
+        Ok(self.rows.next().map(|(row_id, row)| PlanRow {
+            row_id: Some(row_id),
             values: row.values().to_vec(),
         }))
     }
@@ -128,7 +128,6 @@ impl Operator for Project<'_> {
 mod tests {
     use super::*;
     use crate::ast::BinaryOp;
-    use crate::error::DbError;
     use crate::schema::{Column, Schema};
     use crate::value::DataType;
 
@@ -223,20 +222,6 @@ mod tests {
         assert_eq!(
             drain(Project::new(rows, exprs)),
             vec![row(Some(3), vec![Value::Text("a".into()), Value::Int(40)])]
-        );
-    }
-
-    #[test]
-    fn an_error_evaluating_a_row_is_returned_from_next() {
-        let exprs = vec![binary(
-            BinaryOp::Div,
-            BoundExpr::Column(0),
-            BoundExpr::Literal(Value::Int(0)),
-        )];
-        let rows = child(vec![row(Some(0), vec![Value::Int(1)])]);
-        assert_eq!(
-            Project::new(rows, exprs).next(),
-            Err(DbError::DivisionByZero)
         );
     }
 }

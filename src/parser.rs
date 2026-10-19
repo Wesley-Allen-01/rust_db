@@ -140,7 +140,7 @@ impl Parser {
         } else {
             None
         };
-        let filter = if self.eat_keyword(Keyword::Where) {
+        let predicate = if self.eat_keyword(Keyword::Where) {
             Some(self.expr()?)
         } else {
             None
@@ -148,7 +148,7 @@ impl Parser {
         Ok(Select {
             items,
             from,
-            filter,
+            predicate,
         })
     }
 

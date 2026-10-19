@@ -11,27 +11,27 @@ use crate::table::Table;
 pub fn plan_select<'a>(db: &'a Database, select: BoundSelect) -> Result<Box<dyn Operator + 'a>> {
     let rows = match &select.from {
         // The binder has checked the name; `get` checks it again as a guard.
-        Some(name) => plan_matching_rows(db.get(name)?, select.filter),
+        Some(name) => plan_matching_rows(db.get(name)?, select.predicate),
         // Without FROM, the SELECT list is computed once, over a single empty Row.
-        None => filtered(Box::new(SingleRow::new()), select.filter),
+        None => with_filter(Box::new(SingleRow::new()), select.predicate),
     };
     Ok(Box::new(Project::new(rows, select.exprs)))
 }
 
-/// The Rows of `table` for which `filter` is TRUE (every Row without one),
+/// The Rows of `table` for which `predicate` is TRUE (every Row without one),
 /// in Row ID order, each with its Row ID.
 pub fn plan_matching_rows<'a>(
     table: &'a Table,
-    filter: Option<BoundExpr>,
+    predicate: Option<BoundExpr>,
 ) -> Box<dyn Operator + 'a> {
-    filtered(Box::new(Scan::new(table)), filter)
+    with_filter(Box::new(Scan::new(table)), predicate)
 }
 
-fn filtered<'a>(
+fn with_filter<'a>(
     child: Box<dyn Operator + 'a>,
-    filter: Option<BoundExpr>,
+    predicate: Option<BoundExpr>,
 ) -> Box<dyn Operator + 'a> {
-    match filter {
+    match predicate {
         Some(predicate) => Box::new(Filter::new(child, predicate)),
         None => child,
     }
@@ -45,8 +45,8 @@ mod tests {
     use crate::table::RowId;
     use crate::value::{DataType, Value};
 
-    fn matching_row_ids(table: &Table, filter: Option<BoundExpr>) -> Vec<RowId> {
-        let mut plan = plan_matching_rows(table, filter);
+    fn matching_row_ids(table: &Table, predicate: Option<BoundExpr>) -> Vec<RowId> {
+        let mut plan = plan_matching_rows(table, predicate);
         let mut ids = Vec::new();
         while let Some(row) = plan.next().unwrap() {
             ids.push(row.row_id.expect("a Scanned Row has a Row ID"));

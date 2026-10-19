@@ -49,7 +49,7 @@ pub struct DropTable {
 pub struct Select {
     pub items: Vec<SelectItem>,
     pub from: Option<String>,
-    pub filter: Option<Expr>,
+    pub predicate: Option<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
