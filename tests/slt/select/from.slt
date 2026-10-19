@@ -1,0 +1,20 @@
+# SELECT ... FROM reads a Table's Rows in Row ID order.
+
+statement ok
+CREATE TABLE users (id INT NOT NULL, name TEXT, score FLOAT, active BOOL);
+
+# An empty Table gives no Rows.
+query ITRB
+SELECT * FROM users;
+----
+
+statement ok
+INSERT INTO users VALUES (1, 'ada', 9.5, true), (2, 'bob', NULL, false), (3, NULL, 7, NULL);
+
+# `*` is every Column in Schema order.
+query ITRB
+SELECT * FROM users;
+----
+1 ada 9.5 true
+2 bob NULL false
+3 NULL 7 NULL

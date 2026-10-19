@@ -51,7 +51,7 @@ impl ResultSet {
 pub fn execute(db: &mut Database, sql: &str) -> Result<Output> {
     let statement = parse(sql)?;
     match bind(db, statement)? {
-        BoundStatement::Select(select) => run_select(select).map(Output::Rows),
+        BoundStatement::Select(select) => run_select(db, select).map(Output::Rows),
         // The binder has checked the name; the Database checks it again as a guard.
         BoundStatement::CreateTable(create) => {
             db.create_table(create.name, create.schema)?;
@@ -72,7 +72,7 @@ fn run_insert(db: &mut Database, insert: BoundInsert) -> Result<Output> {
     let rows = insert
         .rows
         .iter()
-        .map(|row| row.iter().map(eval).collect::<Result<Vec<Value>>>())
+        .map(|row| row.iter().map(|expr| eval(expr, &[])).collect::<Result<Vec<Value>>>())
         .collect::<Result<Vec<_>>>()?;
     let count = rows.len() as u64;
     db.get_mut(&insert.table)?.insert_all(rows)?;
@@ -91,12 +91,12 @@ fn done(tag: &str) -> Output {
     }
 }
 
-fn run_select(select: BoundSelect) -> Result<ResultSet> {
+fn run_select(db: &Database, select: BoundSelect) -> Result<ResultSet> {
     let columns = select.columns.clone();
-    let mut plan = plan_select(select);
+    let mut plan = plan_select(db, select)?;
     let mut rows = Vec::new();
     while let Some(row) = plan.next()? {
-        rows.push(row);
+        rows.push(row.values);
     }
     Ok(ResultSet { columns, rows })
 }
@@ -160,18 +160,40 @@ mod tests {
     }
 
     // Here rather than in slt, which can't check Column names.
+    fn result_columns(db: &mut Database, sql: &str) -> Vec<ResultColumn> {
+        match execute(db, sql).unwrap() {
+            Output::Rows(result) => result.columns,
+            other => panic!("expected Rows, got {other:?}"),
+        }
+    }
+
     #[test]
-    fn as_names_a_result_column() {
-        let Output::Rows(result) = execute(&mut Database::new(), "SELECT 1 AS one, 'a'").unwrap()
-        else {
-            panic!("expected Rows");
-        };
+    fn a_result_column_is_named_by_alias_then_column_name_then_expression_text() {
+        let mut db = Database::new();
+        execute(&mut db, "CREATE TABLE t (id INT, name TEXT)").unwrap();
+        let sql = "SELECT id + 1 AS next, Name, -id * (2 + 1.5), 'it''s', name IS NOT NULL FROM t";
         assert_eq!(
-            result.columns,
+            result_columns(&mut db, sql),
             vec![
-                ResultColumn::new("one", DataType::Int),
-                // Postgres's name for an unnamed expression.
-                ResultColumn::new("?column?", DataType::Text),
+                ResultColumn::new("next", DataType::Int),
+                // The lexer folds names to lowercase.
+                ResultColumn::new("name", DataType::Text),
+                ResultColumn::new("(-id) * (2 + 1.5)", DataType::Float),
+                ResultColumn::new("'it''s'", DataType::Text),
+                ResultColumn::new("name IS NOT NULL", DataType::Bool),
+            ]
+        );
+    }
+
+    #[test]
+    fn star_names_each_column_as_the_schema_does() {
+        let mut db = Database::new();
+        execute(&mut db, "CREATE TABLE t (id INT, score FLOAT)").unwrap();
+        assert_eq!(
+            result_columns(&mut db, "SELECT * FROM t"),
+            vec![
+                ResultColumn::new("id", DataType::Int),
+                ResultColumn::new("score", DataType::Float),
             ]
         );
     }

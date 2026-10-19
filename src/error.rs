@@ -58,6 +58,14 @@ pub enum DbError {
         operand: Option<DataType>,
     },
 
+    /// `SELECT *` without a FROM Table to expand it.
+    WildcardWithoutTable,
+
+    /// A WHERE whose Data Type isn't BOOL.
+    WhereNotBool {
+        got: DataType,
+    },
+
     IntegerOverflow,
 
     FloatOverflow,
@@ -127,6 +135,14 @@ impl fmt::Display for DbError {
             DbError::UnaryTypeMismatch { op, operand } => {
                 let operand = type_name(operand);
                 write!(f, "operator {op} cannot be applied to {operand}")
+            }
+
+            DbError::WildcardWithoutTable => {
+                write!(f, "SELECT * needs a table to read from")
+            }
+
+            DbError::WhereNotBool { got } => {
+                write!(f, "WHERE must be BOOL, got {got}")
             }
 
             DbError::IntegerOverflow => write!(f, "integer out of range"),

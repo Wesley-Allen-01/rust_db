@@ -4,6 +4,9 @@ use crate::value::Value;
 use std::collections::BTreeMap;
 use std::ops::Index;
 
+/// A Table's permanent handle for one of its Rows (see GLOSSARY.md).
+pub type RowId = usize;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row(Vec<Value>);
 
@@ -115,7 +118,7 @@ impl Table {
         self.rows.values()
     }
 
-    pub fn iter_with_ids(&self) -> impl Iterator<Item = (usize, &Row)> + '_ {
+    pub fn iter_with_ids(&self) -> impl Iterator<Item = (RowId, &Row)> + '_ {
         self.rows.iter().map(|(&id, row)| (id, row))
     }
 }

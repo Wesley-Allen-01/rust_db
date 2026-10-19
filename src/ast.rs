@@ -44,16 +44,20 @@ pub struct DropTable {
     pub if_exists: bool,
 }
 
+/// `SELECT item, ... [FROM table] [WHERE expr]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Select {
     pub items: Vec<SelectItem>,
+    pub from: Option<String>,
+    pub filter: Option<Expr>,
 }
 
-/// One output expression of a SELECT, with its optional `AS` name.
 #[derive(Debug, Clone, PartialEq)]
-pub struct SelectItem {
-    pub expr: Expr,
-    pub alias: Option<String>,
+pub enum SelectItem {
+    /// `*`: every Column of the FROM Table.
+    Wildcard,
+    /// One output expression, with its optional `AS` name.
+    Expr { expr: Expr, alias: Option<String> },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -112,6 +116,49 @@ impl BinaryOp {
                 | BinaryOp::Gt
                 | BinaryOp::GtEq
         )
+    }
+}
+
+/// The expression as SQL text, used to name an unaliased Result Set Column.
+/// Every compound operand is parenthesised, so the text never depends on
+/// operator precedence.
+impl fmt::Display for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Expr::Literal(Value::Text(s)) => write!(f, "'{}'", s.replace('\'', "''")),
+            // Debug keeps the `.0` that tells `1.0` from `1`.
+            Expr::Literal(Value::Float(x)) => write!(f, "{x:?}"),
+            Expr::Literal(value) => write!(f, "{value}"),
+            Expr::Column(name) => f.write_str(name),
+            Expr::Unary {
+                op: UnaryOp::Neg,
+                operand,
+            } => write!(f, "-{}", Operand(operand)),
+            Expr::Unary {
+                op: UnaryOp::Not,
+                operand,
+            } => write!(f, "NOT {}", Operand(operand)),
+            Expr::Binary { op, left, right } => {
+                write!(f, "{} {op} {}", Operand(left), Operand(right))
+            }
+            Expr::IsNull { operand, negated } => {
+                let not = if *negated { " NOT" } else { "" };
+                write!(f, "{} IS{not} NULL", Operand(operand))
+            }
+        }
+    }
+}
+
+/// An operand inside a larger expression: parenthesised unless it is a
+/// literal or a Column name.
+struct Operand<'a>(&'a Expr);
+
+impl fmt::Display for Operand<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Expr::Literal(_) | Expr::Column(_) => write!(f, "{}", self.0),
+            compound => write!(f, "({compound})"),
+        }
     }
 }
 

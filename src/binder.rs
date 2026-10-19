@@ -5,10 +5,13 @@
 //! evaluation never has to look at types. A Value going into a Column is coerced by
 //! the Table instead, which does it for every Row it stores.
 
-use crate::ast::{BinaryOp, CreateTable, DropTable, Expr, Insert, SelectItem, Statement, UnaryOp};
+use crate::ast::{
+    BinaryOp, CreateTable, DropTable, Expr, Insert, Select, SelectItem, Statement, UnaryOp,
+};
 use crate::database::Database;
 use crate::error::{DbError, Result};
 use crate::schema::{Column, ResultColumn, Schema};
+use crate::table::Table;
 use crate::value::{DataType, Value};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -47,8 +50,15 @@ pub struct BoundInsert {
     pub rows: Vec<Vec<BoundExpr>>,
 }
 
+/// A SELECT whose names all resolve. Every expression, WHERE included, reads
+/// the Rows of the `from` Table, or a single empty Row without FROM.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BoundSelect {
+    /// The Table's name as stored, whatever case the query used.
+    pub from: Option<String>,
+    /// The WHERE, known to be BOOL (or NULL).
+    pub filter: Option<BoundExpr>,
+    /// The SELECT list, with `*` expanded.
     pub exprs: Vec<BoundExpr>,
     /// One per expression, in the same order.
     pub columns: Vec<ResultColumn>,
@@ -57,6 +67,8 @@ pub struct BoundSelect {
 #[derive(Debug, Clone, PartialEq)]
 pub enum BoundExpr {
     Literal(Value),
+    /// The Value at this index in the Row being evaluated, in Schema order.
+    Column(usize),
     Unary {
         op: UnaryOp,
         operand: Box<BoundExpr>,
@@ -82,16 +94,7 @@ type ExprType = Option<DataType>;
 
 pub fn bind(db: &Database, statement: Statement) -> Result<BoundStatement> {
     match statement {
-        Statement::Select(select) => {
-            let mut exprs = Vec::new();
-            let mut columns = Vec::new();
-            for item in select.items {
-                let (expr, column) = bind_select_item(item)?;
-                exprs.push(expr);
-                columns.push(column);
-            }
-            Ok(BoundStatement::Select(BoundSelect { exprs, columns }))
-        }
+        Statement::Select(select) => bind_select(db, select),
         Statement::CreateTable(create) => bind_create_table(db, create),
         Statement::DropTable(drop) => bind_drop_table(db, drop),
         Statement::Insert(insert) => bind_insert(db, insert),
@@ -150,7 +153,7 @@ fn bind_insert_row(schema: &Schema, targets: &[usize], row: Vec<Expr>) -> Result
 /// the Table, since an expression such as `NULL + 1` is only known to be NULL
 /// once evaluated.
 fn bind_insert_value(column: &Column, expr: Expr) -> Result<BoundExpr> {
-    let (expr, ty) = bind_expr(expr)?;
+    let (expr, ty) = bind_expr(expr, None)?;
     match ty {
         Some(ty) if !ty.coerces_to(column.data_type()) => Err(DbError::TypeMismatch {
             column: column.name().to_string(),
@@ -203,33 +206,81 @@ fn bind_drop_table(db: &Database, drop: DropTable) -> Result<BoundStatement> {
     }
 }
 
-fn bind_select_item(item: SelectItem) -> Result<(BoundExpr, ResultColumn)> {
-    let name = match (&item.alias, &item.expr) {
-        (Some(alias), _) => alias.clone(),
-        (None, Expr::Column(name)) => name.clone(),
-        // Postgres's name for an unnamed expression.
-        (None, _) => "?column?".to_string(),
+/// The Table named in FROM, if any, is the scope for every expression,
+/// including WHERE.
+fn bind_select(db: &Database, select: Select) -> Result<BoundStatement> {
+    let table = select.from.as_deref().map(|name| db.get(name)).transpose()?;
+    let scope = table.map(Table::schema);
+    let mut exprs = Vec::new();
+    let mut columns = Vec::new();
+    for item in select.items {
+        match item {
+            SelectItem::Wildcard => {
+                let schema = scope.ok_or(DbError::WildcardWithoutTable)?;
+                for (index, column) in schema.columns().iter().enumerate() {
+                    exprs.push(BoundExpr::Column(index));
+                    columns.push(ResultColumn::new(column.name(), column.data_type()));
+                }
+            }
+            SelectItem::Expr { expr, alias } => {
+                let (expr, column) = bind_select_expr(expr, alias, scope)?;
+                exprs.push(expr);
+                columns.push(column);
+            }
+        }
+    }
+    Ok(BoundStatement::Select(BoundSelect {
+        from: table.map(|table| table.name().to_string()),
+        filter: bind_filter(select.filter, scope)?,
+        exprs,
+        columns,
+    }))
+}
+
+/// Binds a WHERE, which must be BOOL. NULL is allowed: it drops every Row.
+fn bind_filter(filter: Option<Expr>, scope: Option<&Schema>) -> Result<Option<BoundExpr>> {
+    let Some(filter) = filter else {
+        return Ok(None);
     };
-    let (expr, ty) = bind_expr(item.expr)?;
+    match bind_expr(filter, scope)? {
+        (_, Some(ty)) if ty != DataType::Bool => Err(DbError::WhereNotBool { got: ty }),
+        (filter, _) => Ok(Some(filter)),
+    }
+}
+
+/// The Result Set Column is named by the alias, or else by the expression's
+/// text, which for a Column reference is the Column's name.
+fn bind_select_expr(
+    expr: Expr,
+    alias: Option<String>,
+    scope: Option<&Schema>,
+) -> Result<(BoundExpr, ResultColumn)> {
+    let name = alias.unwrap_or_else(|| expr.to_string());
+    let (expr, ty) = bind_expr(expr, scope)?;
     // A Column that is only ever NULL gets TEXT, as Postgres does for its
     // "unknown" type.
     let data_type = ty.unwrap_or(DataType::Text);
     Ok((expr, ResultColumn::new(name, data_type)))
 }
 
-fn bind_expr(expr: Expr) -> Result<(BoundExpr, ExprType)> {
+fn bind_expr(expr: Expr, scope: Option<&Schema>) -> Result<(BoundExpr, ExprType)> {
     match expr {
         Expr::Literal(value) => {
             let ty = value.type_of();
             Ok((BoundExpr::Literal(value), ty))
         }
-        // Without FROM there are no Columns in scope.
-        Expr::Column(name) => Err(DbError::NoSuchColumn { name }),
-        Expr::Unary { op, operand } => bind_unary(op, *operand),
-        Expr::Binary { op, left, right } => bind_binary(op, *left, *right),
+        Expr::Column(name) => {
+            // Without FROM there are no Columns in scope.
+            let schema = scope.ok_or_else(|| DbError::NoSuchColumn { name: name.clone() })?;
+            let index = schema.resolve(&name)?;
+            let ty = schema.columns()[index].data_type();
+            Ok((BoundExpr::Column(index), Some(ty)))
+        }
+        Expr::Unary { op, operand } => bind_unary(op, *operand, scope),
+        Expr::Binary { op, left, right } => bind_binary(op, *left, *right, scope),
         Expr::IsNull { operand, negated } => {
             // Any Data Type can be tested for NULL.
-            let (operand, _) = bind_expr(*operand)?;
+            let (operand, _) = bind_expr(*operand, scope)?;
             let bound = BoundExpr::IsNull {
                 operand: Box::new(operand),
                 negated,
@@ -239,8 +290,8 @@ fn bind_expr(expr: Expr) -> Result<(BoundExpr, ExprType)> {
     }
 }
 
-fn bind_unary(op: UnaryOp, operand: Expr) -> Result<(BoundExpr, ExprType)> {
-    let (operand, ty) = bind_expr(operand)?;
+fn bind_unary(op: UnaryOp, operand: Expr, scope: Option<&Schema>) -> Result<(BoundExpr, ExprType)> {
+    let (operand, ty) = bind_expr(operand, scope)?;
     let result_ty = match op {
         UnaryOp::Neg if is_numeric(ty) => numeric_result(ty),
         UnaryOp::Not if fits(ty, DataType::Bool) => Some(DataType::Bool),
@@ -253,9 +304,9 @@ fn bind_unary(op: UnaryOp, operand: Expr) -> Result<(BoundExpr, ExprType)> {
     Ok((bound, result_ty))
 }
 
-fn bind_binary(op: BinaryOp, left: Expr, right: Expr) -> Result<(BoundExpr, ExprType)> {
-    let (left, left_ty) = bind_expr(left)?;
-    let (right, right_ty) = bind_expr(right)?;
+fn bind_binary(op: BinaryOp, left: Expr, right: Expr, scope: Option<&Schema>) -> Result<(BoundExpr, ExprType)> {
+    let (left, left_ty) = bind_expr(left, scope)?;
+    let (right, right_ty) = bind_expr(right, scope)?;
     let mismatch = DbError::BinaryTypeMismatch {
         op,
         left: left_ty,
