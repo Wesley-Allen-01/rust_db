@@ -1,8 +1,9 @@
 //! Checks a parsed Statement's names and Data Types before anything runs (ADR-0003).
 //!
 //! The output is a bound Statement: every expression is known to be well-typed,
-//! and every INT-to-FLOAT Coercion is an explicit `ToFloat`, so evaluation never has
-//! to look at types.
+//! and every INT-to-FLOAT Coercion within an expression is an explicit `ToFloat`, so
+//! evaluation never has to look at types. A Value going into a Column is coerced by
+//! the Table instead, which does it for every Row it stores.
 
 use crate::ast::{BinaryOp, CreateTable, DropTable, Expr, Insert, SelectItem, Statement, UnaryOp};
 use crate::database::Database;
