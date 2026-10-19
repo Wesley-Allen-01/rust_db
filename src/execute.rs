@@ -72,3 +72,57 @@ fn run_select(select: BoundSelect) -> Result<ResultSet> {
         rows,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::DbError;
+
+    fn query(sql: &str) -> ResultSet {
+        match execute(&mut Database::new(), sql).unwrap() {
+            Output::Rows(result) => result,
+            other => panic!("expected Rows, got {other:?}"),
+        }
+    }
+
+    fn error(sql: &str) -> String {
+        execute(&mut Database::new(), sql).unwrap_err().to_string()
+    }
+
+    #[test]
+    fn as_names_an_output_column() {
+        let result = query("SELECT 1 AS one, 2");
+        assert_eq!(result.columns, vec!["one", "?column?"]);
+    }
+
+    #[test]
+    fn a_second_statement_is_an_error() {
+        assert_eq!(
+            error("SELECT 1; SELECT 2;"),
+            "line 1, col 11: expected end of statement"
+        );
+    }
+
+    #[test]
+    fn a_trailing_semicolon_is_optional() {
+        assert_eq!(query("SELECT 1;").rows, query("SELECT 1").rows);
+        assert!(matches!(
+            execute(&mut Database::new(), "SELECT 1;;"),
+            Err(DbError::Syntax { .. })
+        ));
+    }
+
+    #[test]
+    fn errors_at_end_of_input_point_past_the_last_character() {
+        assert_eq!(error("SELECT"), "line 1, col 7: expected an expression");
+        assert_eq!(
+            error("SELECT 1,\n  "),
+            "line 2, col 3: expected an expression"
+        );
+    }
+
+    #[test]
+    fn lexer_errors_surface_as_syntax_errors() {
+        assert_eq!(error("SELECT \"x\""), "line 1, col 8: double-quoted identifiers are not supported");
+    }
+}
