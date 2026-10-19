@@ -134,6 +134,7 @@ pub enum LexErrorKind {
     UnexpectedChar(char),
     IntegerOutOfRange,
     UnterminatedString,
+    QuotedIdentifier,
 }
 
 impl fmt::Display for LexError {
@@ -143,6 +144,9 @@ impl fmt::Display for LexError {
             LexErrorKind::UnexpectedChar(c) => write!(f, "unexpected character '{c}'"),
             LexErrorKind::IntegerOutOfRange => write!(f, "integer literal out of range"),
             LexErrorKind::UnterminatedString => write!(f, "unterminated string literal"),
+            LexErrorKind::QuotedIdentifier => {
+                write!(f, "double-quoted identifiers are not supported")
+            }
         }
     }
 }
@@ -175,6 +179,10 @@ impl Lexer {
         while let Some(c) = self.peek() {
             if c.is_whitespace() {
                 self.bump();
+                continue;
+            }
+            if c == '-' && self.chars.get(self.i + 1) == Some(&'-') {
+                self.skip_comment();
                 continue;
             }
             let pos = self.pos();
@@ -248,6 +256,12 @@ impl Lexer {
         }
     }
 
+    fn skip_comment(&mut self) {
+        while self.peek().is_some_and(|c| c != '\n') {
+            self.bump();
+        }
+    }
+
     fn digits(&mut self) -> String {
         let mut digits = String::new();
         while let Some(c) = self.peek().filter(char::is_ascii_digit) {
@@ -271,6 +285,13 @@ impl Lexer {
             ',' => Token::Comma,
             ';' => Token::Semicolon,
             '.' => Token::Dot,
+            // Rejected outright so names stay case-insensitive everywhere.
+            '"' => {
+                return Err(LexError {
+                    pos,
+                    kind: LexErrorKind::QuotedIdentifier,
+                });
+            }
             '<' if self.eat('=') => Token::LtEq,
             '<' if self.eat('>') => Token::NotEq,
             '<' => Token::Lt,
@@ -446,6 +467,70 @@ mod tests {
             err.to_string(),
             "line 1, col 8: unterminated string literal"
         );
+    }
+
+    #[test]
+    fn rejects_a_double_quoted_identifier() {
+        let err = error("select \"Name\" from t");
+        assert_eq!(err.kind, LexErrorKind::QuotedIdentifier);
+        assert_eq!(err.pos, at(1, 8));
+        assert_eq!(
+            err.to_string(),
+            "line 1, col 8: double-quoted identifiers are not supported"
+        );
+    }
+
+    #[test]
+    fn comments_run_to_the_end_of_the_line() {
+        let lexed = tokenize("select -- the rest is ignored: @ 'x\n  a -- trailing").unwrap();
+        let toks: Vec<_> = lexed.iter().map(|t| t.token.clone()).collect();
+        assert_eq!(
+            toks,
+            vec![Token::Keyword(Keyword::Select), Token::Ident("a".into())]
+        );
+        assert_eq!(lexed[1].pos, at(2, 3));
+    }
+
+    #[test]
+    fn a_single_dash_is_still_minus() {
+        assert_eq!(
+            tokens("a - -b"),
+            vec![
+                Token::Ident("a".into()),
+                Token::Minus,
+                Token::Minus,
+                Token::Ident("b".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lexes_a_whole_statement_with_positions() {
+        use Token::*;
+        let lexed = tokenize("SELECT 1 + 2.5 AS x, 'a' || name;").unwrap();
+        let got: Vec<(Token, usize)> = lexed.into_iter().map(|t| (t.token, t.pos.col)).collect();
+        assert_eq!(
+            got,
+            vec![
+                (Keyword(self::Keyword::Select), 1),
+                (Integer(1), 8),
+                (Plus, 10),
+                (Float(2.5), 12),
+                (Keyword(self::Keyword::As), 16),
+                (Ident("x".into()), 19),
+                (Comma, 20),
+                (Text("a".into()), 22),
+                (Concat, 26),
+                (Ident("name".into()), 29),
+                (Semicolon, 33),
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_and_blank_input_give_no_tokens() {
+        assert_eq!(tokens(""), vec![]);
+        assert_eq!(tokens("  \n -- only a comment"), vec![]);
     }
 
     fn error(sql: &str) -> LexError {
