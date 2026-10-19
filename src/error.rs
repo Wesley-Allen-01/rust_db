@@ -79,6 +79,11 @@ pub enum DbError {
         name: String,
     },
 
+    /// An ORDER BY position outside the SELECT list.
+    NoSuchPosition {
+        position: i64,
+    },
+
     /// A LIMIT or OFFSET count whose Data Type isn't INT. `None` is NULL.
     CountNotInt {
         clause: &'static str,
@@ -173,6 +178,10 @@ impl fmt::Display for DbError {
 
             DbError::AmbiguousColumn { name } => {
                 write!(f, "column name `{name}` is ambiguous")
+            }
+
+            DbError::NoSuchPosition { position } => {
+                write!(f, "ORDER BY position {position} is not in the SELECT list")
             }
 
             DbError::CountNotInt { clause, got } => {

@@ -342,9 +342,10 @@ fn bind_count(clause: &'static str, count: Option<Expr>) -> Result<Option<usize>
     }
 }
 
-/// A bare name that is an output Column's name sorts by that Column's
-/// expression, so an alias works as a key. Any other key is an expression
-/// over the input Columns, as in Postgres.
+/// As in Postgres, a bare INT is a position in the SELECT list, and a bare
+/// name that is an output Column's name sorts by that Column's expression, so
+/// an alias works as a key. Any other key is an expression over the input
+/// Columns.
 fn bind_sort_key(
     item: OrderByItem,
     exprs: &[BoundExpr],
@@ -352,6 +353,7 @@ fn bind_sort_key(
     scope: Option<&Schema>,
 ) -> Result<SortKey> {
     let expr = match &item.expr {
+        Expr::Literal(Value::Int(position)) => output_at(*position, exprs)?,
         Expr::Column(name) => match output_expr(name, exprs, columns)? {
             Some(expr) => expr,
             None => bind_expr(item.expr, scope)?.0,
@@ -362,6 +364,15 @@ fn bind_sort_key(
         expr,
         descending: item.descending,
     })
+}
+
+/// The expression of the output Column at `position`, counting from 1.
+fn output_at(position: i64, exprs: &[BoundExpr]) -> Result<BoundExpr> {
+    usize::try_from(position)
+        .ok()
+        .and_then(|position| exprs.get(position.checked_sub(1)?))
+        .cloned()
+        .ok_or(DbError::NoSuchPosition { position })
 }
 
 /// The expression of the output Column called `name`, if there is one.

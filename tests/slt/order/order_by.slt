@@ -100,3 +100,25 @@ query I
 SELECT 1 + 1 AS two ORDER BY two;
 ----
 2
+
+# A bare INT is a position in the SELECT list, counting from 1, as in Postgres.
+query TI
+SELECT name, id FROM people ORDER BY 2 DESC;
+----
+bob 3
+ada 2
+carol 1
+
+statement error ORDER BY position 3 is not in the SELECT list
+SELECT name, id FROM people ORDER BY 3;
+
+statement error ORDER BY position 0 is not in the SELECT list
+SELECT name, id FROM people ORDER BY 0;
+
+# Only a bare INT is a position. Any other constant sorts nothing.
+query I
+SELECT id FROM people ORDER BY 1 + 0, 'x', id DESC;
+----
+3
+2
+1
