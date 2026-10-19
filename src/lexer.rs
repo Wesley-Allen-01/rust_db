@@ -121,6 +121,8 @@ pub struct Position {
 pub struct PositionedToken {
     pub token: Token,
     pub pos: Position,
+    /// Byte offset of the token's first character, for slicing the source.
+    pub offset: usize,
 }
 
 /// Kept separate from `DbError` so the lexer stays free of crate
@@ -128,13 +130,9 @@ pub struct PositionedToken {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LexError {
     pub pos: Position,
+    /// Byte offset of `pos`, for slicing the source.
+    pub offset: usize,
     pub kind: LexErrorKind,
-}
-
-impl LexError {
-    fn new(pos: Position, kind: LexErrorKind) -> LexError {
-        LexError { pos, kind }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,7 +156,7 @@ impl fmt::Display for LexError {
 impl fmt::Display for LexErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LexErrorKind::UnexpectedChar(c) => write!(f, "unexpected character '{c}'"),
+            LexErrorKind::UnexpectedChar(c) => write!(f, "unexpected character `{c}`"),
             LexErrorKind::NumberOutOfRange => write!(f, "numeric literal out of range"),
             LexErrorKind::UnterminatedString => write!(f, "unterminated string literal"),
             LexErrorKind::QuotedIdentifier => {
@@ -183,6 +181,11 @@ struct Lexer {
     i: usize,
     /// Where `chars[i]` sits in the source.
     pos: Position,
+    /// The byte offset of `chars[i]`.
+    offset: usize,
+    /// Where the token being lexed starts, as `pos` and `offset`.
+    token_pos: Position,
+    token_offset: usize,
 }
 
 impl Lexer {
@@ -191,6 +194,9 @@ impl Lexer {
             chars: sql.chars().collect(),
             i: 0,
             pos: Position { line: 1, col: 1 },
+            offset: 0,
+            token_pos: Position { line: 1, col: 1 },
+            token_offset: 0,
         }
     }
 
@@ -205,17 +211,21 @@ impl Lexer {
                 self.skip_comment();
                 continue;
             }
-            let pos = self.pos;
+            (self.token_pos, self.token_offset) = (self.pos, self.offset);
             let token = if c.is_alphabetic() || c == '_' {
                 self.word()
             } else if c == '\'' {
-                self.text(pos)?
+                self.text()?
             } else if c.is_ascii_digit() {
-                self.number(pos)?
+                self.number()?
             } else {
-                self.symbol(c, pos)?
+                self.symbol(c)?
             };
-            out.push(PositionedToken { token, pos });
+            out.push(PositionedToken {
+                token,
+                pos: self.token_pos,
+                offset: self.token_offset,
+            });
         }
         Ok(out)
     }
@@ -232,7 +242,7 @@ impl Lexer {
         }
     }
 
-    fn number(&mut self, pos: Position) -> Result<Token, LexError> {
+    fn number(&mut self) -> Result<Token, LexError> {
         let mut text = self.digits();
         // `1.x` is `1` then `.`; only a digit after the dot makes a float.
         let digit_after_dot = self.peek_next().is_some_and(|c| c.is_ascii_digit());
@@ -246,9 +256,9 @@ impl Lexer {
         // several tokens.
         let glued = |c: char| is_word_char(c) || (is_float && c == '.');
         if let Some(c) = self.peek().filter(|c| glued(*c)) {
-            return Err(LexError::new(self.pos, LexErrorKind::UnexpectedChar(c)));
+            return Err(self.error_here(LexErrorKind::UnexpectedChar(c)));
         }
-        let out_of_range = || LexError::new(pos, LexErrorKind::NumberOutOfRange);
+        let out_of_range = || self.error_at_token(LexErrorKind::NumberOutOfRange);
         if is_float {
             // Digits and one dot always parse, but a huge value parses as
             // infinity, which is not a number the user wrote.
@@ -262,13 +272,13 @@ impl Lexer {
         text.parse().map(Token::Integer).map_err(|_| out_of_range())
     }
 
-    fn text(&mut self, pos: Position) -> Result<Token, LexError> {
-        self.bump(); // past the opening quote; `pos` still points at it for errors
+    fn text(&mut self) -> Result<Token, LexError> {
+        self.bump(); // past the opening quote, where errors still point
         let mut text = String::new();
         loop {
             match self.peek() {
                 None => {
-                    return Err(LexError::new(pos, LexErrorKind::UnterminatedString));
+                    return Err(self.error_at_token(LexErrorKind::UnterminatedString));
                 }
                 Some('\'') => {
                     self.bump();
@@ -300,7 +310,7 @@ impl Lexer {
         digits
     }
 
-    fn symbol(&mut self, c: char, pos: Position) -> Result<Token, LexError> {
+    fn symbol(&mut self, c: char) -> Result<Token, LexError> {
         self.bump();
         let token = match c {
             '+' => Token::Plus,
@@ -316,7 +326,7 @@ impl Lexer {
             '.' => Token::Dot,
             // Rejected outright so names stay case-insensitive everywhere.
             '"' => {
-                return Err(LexError::new(pos, LexErrorKind::QuotedIdentifier));
+                return Err(self.error_at_token(LexErrorKind::QuotedIdentifier));
             }
             '<' if self.eat('=') => Token::LtEq,
             '<' if self.eat('>') => Token::NotEq,
@@ -325,10 +335,28 @@ impl Lexer {
             '>' => Token::Gt,
             '|' if self.eat('|') => Token::Concat,
             _ => {
-                return Err(LexError::new(pos, LexErrorKind::UnexpectedChar(c)));
+                return Err(self.error_at_token(LexErrorKind::UnexpectedChar(c)));
             }
         };
         Ok(token)
+    }
+
+    /// An error at the first character of the token being lexed.
+    fn error_at_token(&self, kind: LexErrorKind) -> LexError {
+        LexError {
+            pos: self.token_pos,
+            offset: self.token_offset,
+            kind,
+        }
+    }
+
+    /// An error at the current character.
+    fn error_here(&self, kind: LexErrorKind) -> LexError {
+        LexError {
+            pos: self.pos,
+            offset: self.offset,
+            kind,
+        }
     }
 
     /// Lets two-character operators like `<=` be matched in a single arm.
@@ -350,6 +378,7 @@ impl Lexer {
     }
 
     fn bump(&mut self) {
+        self.offset += self.peek().map_or(0, char::len_utf8);
         if self.peek() == Some('\n') {
             self.pos.line += 1;
             self.pos.col = 1;
@@ -592,7 +621,7 @@ mod tests {
         let err = error("select a,\n  @x");
         assert_eq!(err.kind, LexErrorKind::UnexpectedChar('@'));
         assert_eq!(err.pos, at(2, 3));
-        assert_eq!(err.to_string(), "line 2, col 3: unexpected character '@'");
+        assert_eq!(err.to_string(), "line 2, col 3: unexpected character `@`");
     }
 
     #[test]
@@ -614,6 +643,24 @@ mod tests {
                 Token::Ident("rowid".into()),
             ]
         );
+    }
+
+    #[test]
+    fn tokens_carry_their_byte_offset() {
+        // `é` is two bytes, so offsets and columns part ways after it.
+        let offsets: Vec<usize> = tokenize("é;\n 'ü' x")
+            .unwrap()
+            .into_iter()
+            .map(|t| t.offset)
+            .collect();
+        assert_eq!(offsets, vec![0, 2, 5, 10]);
+    }
+
+    #[test]
+    fn lex_errors_carry_their_byte_offset() {
+        assert_eq!(error("'é' @").offset, 5);
+        // An open string is reported at its opening quote.
+        assert_eq!(error("é 'abc").offset, 3);
     }
 
     #[test]

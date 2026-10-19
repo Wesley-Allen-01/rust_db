@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS t (id INT, id TEXT);
 statement ok
 DROP TABLE t;
 
-statement error Duplicate column name: `id`
+statement error duplicate column name `id`
 CREATE TABLE IF NOT EXISTS t (id INT, id TEXT);
 
 statement error line 1, col 17: expected NOT

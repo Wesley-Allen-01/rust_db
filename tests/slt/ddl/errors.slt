@@ -1,10 +1,10 @@
 # CREATE TABLE errors: Schema errors from the binder, syntax errors from the parser.
 
 # Column names are case-insensitive.
-statement error Duplicate column name: `id`
+statement error duplicate column name `id`
 CREATE TABLE t (id INT, name TEXT, ID BOOL);
 
-statement error A table must have at least one column
+statement error a table must have at least one column
 CREATE TABLE t ();
 
 statement error line 1, col 20: unknown data type `varchar`

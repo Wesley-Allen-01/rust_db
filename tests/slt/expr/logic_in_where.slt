@@ -1,0 +1,67 @@
+# Three-valued logic over Column Values, in every Statement with a WHERE.
+# Only TRUE keeps a Row. NOT of unknown is still unknown, so negating a
+# WHERE doesn't give back the Rows it dropped.
+
+statement ok
+CREATE TABLE t (id INT, name TEXT, ok BOOL);
+
+statement ok
+INSERT INTO t VALUES (1, 'a', true), (2, NULL, false), (3, 'c', NULL);
+
+# name = 'a' is unknown for Row 2, and so is NOT (name = 'a').
+query I
+SELECT id FROM t WHERE NOT (name = 'a') ORDER BY id;
+----
+3
+
+query I
+SELECT id FROM t WHERE NOT ok;
+----
+2
+
+# IS NULL is the way to reach the unknown Rows.
+query I
+SELECT id FROM t WHERE ok IS NULL OR NOT ok ORDER BY id;
+----
+2
+3
+
+# FALSE decides an AND and TRUE decides an OR, even beside unknown.
+query IBB
+SELECT id, ok AND name IS NULL, ok OR id = 3 FROM t ORDER BY id;
+----
+1 false true
+2 false false
+3 false true
+
+# NOT ok leaves NULL as NULL.
+statement count 3
+UPDATE t SET ok = NOT ok;
+
+query IB
+SELECT id, ok FROM t ORDER BY id;
+----
+1 false
+2 true
+3 NULL
+
+# Row 3 is unknown, so the UPDATE skips it.
+statement count 1
+UPDATE t SET name = 'z' WHERE NOT (ok AND id <> 1);
+
+query IT
+SELECT id, name FROM t ORDER BY id;
+----
+1 z
+2 NULL
+3 c
+
+# Row 3 is unknown, so the DELETE skips it too.
+statement count 1
+DELETE FROM t WHERE ok OR id = 3 AND ok;
+
+query IB
+SELECT id, ok FROM t ORDER BY id;
+----
+1 false
+3 NULL

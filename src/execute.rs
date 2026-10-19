@@ -49,7 +49,7 @@ impl ResultSet {
 ///
 /// The Statement may end with a `;`. Anything after that first `;` (such as a
 /// second Statement) is an error, not silently ignored; the parser enforces this.
-/// For now that means a REPL line holding several Statements is rejected too.
+/// The REPL splits input holding several Statements before calling this.
 pub fn execute(db: &mut Database, sql: &str) -> Result<Output> {
     let statement = parse(sql)?;
     match bind(db, statement)? {

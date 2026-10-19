@@ -1,10 +1,10 @@
 //! The REPL binary: reads lines, runs Meta Commands and Statements, prints results.
 
 use rust_db::database::Database;
-use rust_db::execute::execute;
 use rust_db::repl::input::{Input, InputBuffer};
 use rust_db::repl::meta::{MetaOutcome, run_meta};
 use rust_db::repl::render::render_output;
+use rust_db::repl::run::execute_all;
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 
@@ -45,11 +45,13 @@ fn main() -> rustyline::Result<()> {
                     Err(message) => eprintln!("ERROR: {message}"),
                 }
             }
-            Some(Input::Statement(sql)) => {
+            Some(Input::Sql(sql)) => {
                 editor.add_history_entry(sql.as_str())?;
-                match execute(&mut db, &sql) {
-                    Ok(output) => print!("{}", render_output(&output)),
-                    Err(err) => eprintln!("ERROR: {err}"),
+                for result in execute_all(&mut db, &sql) {
+                    match result {
+                        Ok(output) => print!("{}", render_output(&output)),
+                        Err(err) => eprintln!("ERROR: {err}"),
+                    }
                 }
             }
         }

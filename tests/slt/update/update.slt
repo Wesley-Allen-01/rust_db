@@ -60,7 +60,7 @@ UPDATE users SET id = score;
 statement error column `name` expects TEXT, got INT
 UPDATE users SET name = id WHERE false;
 
-statement error Duplicate column name: `name`
+statement error duplicate column name `name`
 UPDATE users SET name = 'a', NAME = 'b';
 
 statement error no such column `email`

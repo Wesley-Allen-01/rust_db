@@ -72,8 +72,6 @@ pub enum DbError {
 
     DivisionByZero,
 
-    NotYetSupported,
-
     /// An ORDER BY name that matches several different output Columns.
     AmbiguousColumn {
         name: String,
@@ -108,15 +106,16 @@ impl fmt::Display for DbError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DbError::DuplicateColumn { name } => {
-                write!(f, "Duplicate column name: `{name}`")
+                write!(f, "duplicate column name `{name}`")
             }
 
             DbError::EmptySchema => {
-                write!(f, "A table must have at least one column")
+                write!(f, "a table must have at least one column")
             }
 
             DbError::ArityMismatch { expected, got } => {
-                write!(f, "Expected {expected} value(s), got {got}")
+                let noun = if *expected == 1 { "value" } else { "values" };
+                write!(f, "expected {expected} {noun}, got {got}")
             }
 
             DbError::TypeMismatch {
@@ -171,10 +170,6 @@ impl fmt::Display for DbError {
             DbError::FloatOverflow => write!(f, "float out of range"),
 
             DbError::DivisionByZero => write!(f, "division by zero"),
-
-            DbError::NotYetSupported => {
-                write!(f, "not yet supported")
-            }
 
             DbError::AmbiguousColumn { name } => {
                 write!(f, "column name `{name}` is ambiguous")
