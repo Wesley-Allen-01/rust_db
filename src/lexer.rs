@@ -9,6 +9,8 @@ pub enum Token {
     /// An unquoted identifier, folded to lowercase because names are
     /// case-insensitive.
     Ident(String),
+    Integer(i64),
+    Float(f64),
     Plus,
     Minus,
     Star,
@@ -128,6 +130,7 @@ pub struct LexError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LexErrorKind {
     UnexpectedChar(char),
+    IntegerOutOfRange,
 }
 
 impl fmt::Display for LexError {
@@ -135,6 +138,7 @@ impl fmt::Display for LexError {
         write!(f, "line {}, col {}: ", self.pos.line, self.pos.col)?;
         match self.kind {
             LexErrorKind::UnexpectedChar(c) => write!(f, "unexpected character '{c}'"),
+            LexErrorKind::IntegerOutOfRange => write!(f, "integer literal out of range"),
         }
     }
 }
@@ -172,6 +176,8 @@ impl Lexer {
             let pos = self.pos();
             let token = if c.is_alphabetic() || c == '_' {
                 self.word()
+            } else if c.is_ascii_digit() {
+                self.number(pos)?
             } else {
                 self.symbol(c, pos)?
             };
@@ -190,6 +196,33 @@ impl Lexer {
             Some(keyword) => Token::Keyword(keyword),
             None => Token::Ident(word.to_lowercase()),
         }
+    }
+
+    /// Digits, optionally followed by `.` and more digits for a float.
+    fn number(&mut self, pos: Position) -> Result<Token, LexError> {
+        let mut text = self.digits();
+        let digit_after_dot = self.chars.get(self.i + 1).is_some_and(char::is_ascii_digit);
+        if self.peek() == Some('.') && digit_after_dot {
+            self.bump();
+            text.push('.');
+            text.push_str(&self.digits());
+            // Digits and one dot always parse as a float.
+            return Ok(Token::Float(text.parse().unwrap()));
+        }
+        // Only digits remain, so the parse can fail only by overflowing.
+        text.parse().map(Token::Integer).map_err(|_| LexError {
+            pos,
+            kind: LexErrorKind::IntegerOutOfRange,
+        })
+    }
+
+    fn digits(&mut self) -> String {
+        let mut digits = String::new();
+        while let Some(c) = self.peek().filter(char::is_ascii_digit) {
+            digits.push(c);
+            self.bump();
+        }
+        digits
     }
 
     fn symbol(&mut self, c: char, pos: Position) -> Result<Token, LexError> {
@@ -317,6 +350,38 @@ mod tests {
                 Gt,
                 Ident("e".into()),
             ]
+        );
+    }
+
+    #[test]
+    fn lexes_integer_and_float_literals() {
+        assert_eq!(
+            tokens("42 2.5 0 007"),
+            vec![
+                Token::Integer(42),
+                Token::Float(2.5),
+                Token::Integer(0),
+                Token::Integer(7),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_dot_not_followed_by_a_digit_ends_the_number() {
+        assert_eq!(
+            tokens("1.x"),
+            vec![Token::Integer(1), Token::Dot, Token::Ident("x".into())]
+        );
+    }
+
+    #[test]
+    fn rejects_an_integer_too_large_for_64_bits() {
+        let err = error("select 9223372036854775808");
+        assert_eq!(err.kind, LexErrorKind::IntegerOutOfRange);
+        assert_eq!(err.pos, at(1, 8));
+        assert_eq!(
+            err.to_string(),
+            "line 1, col 8: integer literal out of range"
         );
     }
 
