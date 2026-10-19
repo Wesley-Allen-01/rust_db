@@ -22,16 +22,15 @@ impl InputBuffer {
 
     /// Adds a line. Returns a Meta Command at once, or a Statement once it ends with `;`.
     pub fn push(&mut self, line: &str) -> Option<Input> {
-        if self.is_empty() {
-            if line.trim().is_empty() {
-                return None;
-            }
-            // Meta Commands only count at the start of a Statement; mid-Statement a
-            // backslash is just more SQL text.
-            if line.trim_start().starts_with('\\') {
-                return Some(Input::Meta(line.to_string()));
-            }
-        } else {
+        if self.is_empty() && line.trim().is_empty() {
+            return None;
+        }
+        // Like psql, a Meta Command runs at once even mid-Statement, and the
+        // unfinished Statement stays buffered. Inside an open string it is text.
+        if line.trim_start().starts_with('\\') && !self.in_open_string() {
+            return Some(Input::Meta(line.to_string()));
+        }
+        if !self.is_empty() {
             self.text.push('\n');
         }
 
@@ -51,6 +50,10 @@ impl InputBuffer {
     /// Abandons the unfinished Statement.
     pub fn clear(&mut self) {
         self.text.clear();
+    }
+
+    fn in_open_string(&self) -> bool {
+        tokenize(&self.text).is_err_and(|err| err.kind == LexErrorKind::UnterminatedString)
     }
 }
 
@@ -108,11 +111,20 @@ mod tests {
     }
 
     #[test]
-    fn backslash_line_mid_statement_is_sql_text() {
+    fn backslash_line_mid_statement_runs_and_keeps_the_statement() {
         let mut buffer = InputBuffer::new();
         assert_eq!(buffer.push("SELECT"), None);
-        // `\` can't start a SQL token, so the Statement goes to `execute` to report.
-        assert_eq!(buffer.push("\\dt"), statement("SELECT\n\\dt"));
+        assert_eq!(buffer.push("\\dt"), Some(Input::Meta("\\dt".to_string())));
+        assert!(!buffer.is_empty());
+        assert_eq!(buffer.push("1;"), statement("SELECT\n1;"));
+    }
+
+    #[test]
+    fn backslash_line_inside_an_open_string_is_text() {
+        let mut buffer = InputBuffer::new();
+        assert_eq!(buffer.push("SELECT 'a"), None);
+        assert_eq!(buffer.push("\\dt"), None);
+        assert_eq!(buffer.push("';"), statement("SELECT 'a\n\\dt\n';"));
     }
 
     #[test]
