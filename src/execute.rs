@@ -102,6 +102,21 @@ mod tests {
     use super::*;
     use crate::value::DataType;
 
+    fn tag(db: &mut Database, sql: &str) -> String {
+        match execute(db, sql).unwrap() {
+            Output::Done { tag, .. } => tag,
+            other => panic!("expected Done, got {other:?}"),
+        }
+    }
+
+    // Here rather than in slt, which discards the tag.
+    #[test]
+    fn create_and_drop_report_psql_status_tags() {
+        let mut db = Database::new();
+        assert_eq!(tag(&mut db, "CREATE TABLE t (id INT)"), "CREATE TABLE");
+        assert_eq!(tag(&mut db, "DROP TABLE t"), "DROP TABLE");
+    }
+
     // Here rather than in slt, which can't check Column names.
     #[test]
     fn as_names_a_result_column() {
