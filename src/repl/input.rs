@@ -1,5 +1,7 @@
 //! Turns REPL input lines into complete Meta Commands and Statements.
 
+use crate::lexer::{LexErrorKind, Token, tokenize};
+
 /// A complete piece of input, ready to run.
 #[derive(Debug, PartialEq)]
 pub enum Input {
@@ -34,7 +36,7 @@ impl InputBuffer {
         }
 
         self.text.push_str(line);
-        if self.text.trim_end().ends_with(';') {
+        if is_complete(&self.text) {
             Some(Input::Statement(std::mem::take(&mut self.text)))
         } else {
             None
@@ -49,6 +51,18 @@ impl InputBuffer {
     /// Abandons the unfinished Statement.
     pub fn clear(&mut self) {
         self.text.clear();
+    }
+}
+
+/// The lexer, not a raw `ends_with(';')`, decides, so a `;` inside a string or a
+/// `--` comment doesn't end the Statement. Any lex error except an open string is
+/// final too: more lines can't fix it, so `execute` gets to report it.
+fn is_complete(sql: &str) -> bool {
+    match tokenize(sql) {
+        Ok(tokens) => tokens
+            .last()
+            .is_some_and(|last| last.token == Token::Semicolon),
+        Err(err) => err.kind != LexErrorKind::UnterminatedString,
     }
 }
 
@@ -97,8 +111,36 @@ mod tests {
     fn backslash_line_mid_statement_is_sql_text() {
         let mut buffer = InputBuffer::new();
         assert_eq!(buffer.push("SELECT"), None);
-        assert_eq!(buffer.push("\\dt"), None);
-        assert_eq!(buffer.push(";"), statement("SELECT\n\\dt\n;"));
+        // `\` can't start a SQL token, so the Statement goes to `execute` to report.
+        assert_eq!(buffer.push("\\dt"), statement("SELECT\n\\dt"));
+    }
+
+    #[test]
+    fn semicolon_inside_a_string_does_not_end_the_statement() {
+        let mut buffer = InputBuffer::new();
+        assert_eq!(buffer.push("INSERT INTO t VALUES ('a;"), None);
+        assert_eq!(
+            buffer.push("b');"),
+            statement("INSERT INTO t VALUES ('a;\nb');")
+        );
+    }
+
+    #[test]
+    fn semicolon_inside_a_comment_does_not_end_the_statement() {
+        let mut buffer = InputBuffer::new();
+        assert_eq!(buffer.push("SELECT 1 -- note;"), None);
+    }
+
+    #[test]
+    fn trailing_comment_after_semicolon_still_ends_the_statement() {
+        let mut buffer = InputBuffer::new();
+        assert_eq!(buffer.push("SELECT 1; -- one"), statement("SELECT 1; -- one"));
+    }
+
+    #[test]
+    fn lex_errors_other_than_open_strings_are_sent_for_execute_to_report() {
+        let mut buffer = InputBuffer::new();
+        assert_eq!(buffer.push("SELECT @"), statement("SELECT @"));
     }
 
     #[test]
