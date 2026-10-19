@@ -1,0 +1,30 @@
+# Syntax errors point at the offending token; name errors come from the binder.
+
+statement error line 1, col 8: expected an expression
+SELECT ;
+
+statement error line 1, col 12: expected an expression
+SELECT 1 + *
+
+statement error line 1, col 14: expected \)
+SELECT (1 + 2
+
+statement error line 1, col 13: expected a name
+SELECT 1 AS 2
+
+statement error line 1, col 10: expected end of statement
+SELECT 1 2
+
+statement error line 1, col 1: expected a statement
+FROM t
+
+# Only one Statement at a time; the second is an error, not ignored.
+statement error line 1, col 11: expected end of statement
+SELECT 1; SELECT 2;
+
+# Without FROM, no Column is in scope.
+statement error no such column `x`
+SELECT x
+
+statement error no such column `x`
+SELECT 1 + x AS y
