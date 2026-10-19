@@ -106,6 +106,24 @@ impl Table {
         }
     }
 
+    /// Updates every Row or none: all new values are coerced and validated
+    /// before any Row changes. Row IDs that aren't in the Table are skipped.
+    /// Returns how many Rows were updated.
+    pub fn update_all(&mut self, rows: Vec<(RowId, Vec<Value>)>) -> Result<usize> {
+        let rows = rows
+            .into_iter()
+            .map(|(id, values)| Ok((id, self.schema.coerce_row(values)?)))
+            .collect::<Result<Vec<_>>>()?;
+        let mut updated = 0;
+        for (id, values) in rows {
+            if let Some(row) = self.rows.get_mut(&id) {
+                *row = Row(values);
+                updated += 1;
+            }
+        }
+        Ok(updated)
+    }
+
     pub fn delete(&mut self, id: RowId) -> bool {
         self.rows.remove(&id).is_some()
     }
@@ -279,6 +297,57 @@ mod tests {
         assert_eq!(
             u.update(1, vec![1.into(), "jonny".into(), true.into()]),
             Ok(true)
+        );
+    }
+
+    #[test]
+    fn update_all_updates_every_row_in_place_with_coercion() {
+        let mut t = scores();
+        t.insert_all(vec![
+            vec!["ada".into(), 1.5.into()],
+            vec!["bob".into(), 2.5.into()],
+        ])
+        .unwrap();
+        let updated = t
+            .update_all(vec![
+                (1, vec!["bea".into(), 3.into()]),
+                (0, vec!["al".into(), Value::Null]),
+            ])
+            .unwrap();
+        assert_eq!(updated, 2);
+        assert_eq!(
+            t.get(0).unwrap().values(),
+            &[Value::from("al"), Value::Null]
+        );
+        assert_eq!(
+            t.get(1).unwrap().values(),
+            &[Value::from("bea"), Value::Float(3.0)]
+        );
+    }
+
+    #[test]
+    fn update_all_leaves_the_table_unchanged_if_any_row_fails() {
+        let mut t = scores();
+        t.insert_all(vec![
+            vec!["ada".into(), 1.5.into()],
+            vec!["bob".into(), 2.5.into()],
+        ])
+        .unwrap();
+        let err = t
+            .update_all(vec![
+                (0, vec!["al".into(), 9.5.into()]),
+                (1, vec![Value::Null, 9.5.into()]),
+            ])
+            .unwrap_err();
+        assert_eq!(
+            err,
+            DbError::NotNullViolation {
+                column: "name".to_string()
+            }
+        );
+        assert_eq!(
+            t.get(0).unwrap().values(),
+            &[Value::from("ada"), Value::Float(1.5)]
         );
     }
 }

@@ -1,0 +1,102 @@
+# UPDATE sets Columns on the Rows for which WHERE is TRUE, or every Row
+# without one. Coercion and NOT NULL apply exactly as for INSERT.
+
+statement ok
+CREATE TABLE users (id INT NOT NULL, name TEXT, score FLOAT);
+
+statement ok
+INSERT INTO users VALUES (1, 'ada', 9.5), (2, 'bob', NULL), (3, NULL, 7.0);
+
+statement count 1
+UPDATE users SET name = 'bea' WHERE id = 2;
+
+# NULL (unknown) drops a Row from the match, as in SELECT, so Row 3 is kept.
+statement count 1
+UPDATE users SET score = 0.5 WHERE name <> 'bea';
+
+query ITR
+SELECT * FROM users;
+----
+1 ada 0.5
+2 bea NULL
+3 NULL 7
+
+statement count 0
+UPDATE users SET name = 'x' WHERE id > 100;
+
+# SET can read the Row. Every SET sees the Row as it was before the UPDATE,
+# so the swap works. Names are case-insensitive, and an INT is Coerced to FLOAT.
+statement count 3
+UPDATE USERS SET ID = id + 10, score = Id;
+
+query ITR
+SELECT * FROM users;
+----
+11 ada 1
+12 bea 2
+13 NULL 3
+
+statement count 1
+UPDATE users SET id = 9223372036854775807, score = 0 WHERE id = 13;
+
+# The last Row overflows. The others would not, but no Row changes.
+statement error integer out of range
+UPDATE users SET id = id + 1;
+
+statement error column `id` is NOT NULL, got NULL
+UPDATE users SET name = 'z', id = NULL WHERE id < 13;
+
+query ITR
+SELECT * FROM users;
+----
+11 ada 1
+12 bea 2
+9223372036854775807 NULL 0
+
+# Type errors are found before any Row is read.
+statement error column `id` expects INT, got FLOAT
+UPDATE users SET id = score;
+
+statement error column `name` expects TEXT, got INT
+UPDATE users SET name = id WHERE false;
+
+statement error Duplicate column name: `name`
+UPDATE users SET name = 'a', NAME = 'b';
+
+statement error no such column `email`
+UPDATE users SET email = 'x';
+
+statement error no such column `email`
+UPDATE users SET name = email;
+
+statement error no such column `email`
+UPDATE users SET name = 'x' WHERE email = 'y';
+
+statement error WHERE must be BOOL, got INT
+UPDATE users SET name = 'x' WHERE id;
+
+statement error no such table `nope`
+UPDATE nope SET id = 1;
+
+statement error line 1, col 14: expected SET
+UPDATE users name = 'x';
+
+statement error line 1, col 23: expected =
+UPDATE users SET name 'x';
+
+# A NULL known only once the Row is read still meets NOT NULL, and only
+# the second Row fails, yet neither changes.
+statement ok
+CREATE TABLE pairs (a INT NOT NULL, b INT);
+
+statement ok
+INSERT INTO pairs VALUES (1, 10), (2, NULL);
+
+statement error column `a` is NOT NULL, got NULL
+UPDATE pairs SET a = b;
+
+query II
+SELECT * FROM pairs;
+----
+1 10
+2 NULL

@@ -4,8 +4,8 @@
 //! climbing (Pratt parsing). Hand-written per ADR-0001.
 
 use crate::ast::{
-    BinaryOp, ColumnDef, CreateTable, DropTable, Expr, Insert, Select, SelectItem, Statement,
-    UnaryOp,
+    BinaryOp, ColumnDef, CreateTable, Delete, DropTable, Expr, Insert, Select, SelectItem,
+    Statement, UnaryOp, Update,
 };
 use crate::error::{DbError, Result};
 use crate::lexer::{Keyword, Position, PositionedToken, Token, tokenize};
@@ -120,13 +120,13 @@ impl Parser {
         if self.eat_keyword(Keyword::Insert) {
             return Ok(Statement::Insert(self.insert()?));
         }
-        match self.peek() {
-            // Statements whose slices have not landed yet.
-            Some(Token::Keyword(Keyword::Update | Keyword::Delete)) => {
-                Err(DbError::NotYetSupported)
-            }
-            _ => Err(self.error("expected a statement")),
+        if self.eat_keyword(Keyword::Update) {
+            return Ok(Statement::Update(self.update()?));
         }
+        if self.eat_keyword(Keyword::Delete) {
+            return Ok(Statement::Delete(self.delete()?));
+        }
+        Err(self.error("expected a statement"))
     }
 
     /// The part of a SELECT after the `SELECT` keyword.
@@ -254,6 +254,46 @@ impl Parser {
         }
         self.expect(&Token::RParen, "expected , or )")?;
         Ok(items)
+    }
+
+    /// The part of an UPDATE after the `UPDATE` keyword.
+    fn update(&mut self) -> Result<Update> {
+        let table = self.ident()?;
+        self.expect_keyword(Keyword::Set, "expected SET")?;
+        let mut assignments = vec![self.assignment()?];
+        while self.eat(&Token::Comma) {
+            assignments.push(self.assignment()?);
+        }
+        let predicate = self.optional_where()?;
+        Ok(Update {
+            table,
+            assignments,
+            predicate,
+        })
+    }
+
+    /// One `column = expr` of an UPDATE's SET list.
+    fn assignment(&mut self) -> Result<(String, Expr)> {
+        let column = self.ident()?;
+        self.expect(&Token::Eq, "expected =")?;
+        Ok((column, self.expr()?))
+    }
+
+    /// The part of a DELETE after the `DELETE` keyword.
+    fn delete(&mut self) -> Result<Delete> {
+        self.expect_keyword(Keyword::From, "expected FROM")?;
+        let table = self.ident()?;
+        let predicate = self.optional_where()?;
+        Ok(Delete { table, predicate })
+    }
+
+    /// `WHERE expr`, if present.
+    fn optional_where(&mut self) -> Result<Option<Expr>> {
+        if self.eat_keyword(Keyword::Where) {
+            Ok(Some(self.expr()?))
+        } else {
+            Ok(None)
+        }
     }
 
     fn select_item(&mut self) -> Result<SelectItem> {

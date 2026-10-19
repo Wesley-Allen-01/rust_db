@@ -1,4 +1,0 @@
-# Statements whose slices have not landed yet are rejected.
-
-statement error not yet supported
-UPDATE users SET id = 1;
