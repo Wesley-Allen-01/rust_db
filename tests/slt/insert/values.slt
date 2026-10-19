@@ -6,3 +6,25 @@ CREATE TABLE users (id INT NOT NULL, name TEXT, score FLOAT, active BOOL);
 
 statement count 1
 INSERT INTO users VALUES (1, 'ada', 9.5, true);
+
+# A column list can name Columns in any order. Columns it leaves out get NULL.
+statement count 1
+INSERT INTO users (name, id) VALUES ('bob', 2);
+
+# Leaving out a NOT NULL Column gives it NULL, which it rejects.
+statement error column `id` is NOT NULL, got NULL
+INSERT INTO users (name) VALUES ('cy');
+
+# Column names are case-insensitive.
+statement count 1
+INSERT INTO users (ID) VALUES (3);
+
+statement error no such column `email`
+INSERT INTO users (id, email) VALUES (4, 'x');
+
+statement error Duplicate column name: `id`
+INSERT INTO users (id, ID) VALUES (4, 5);
+
+# Each row must give exactly one value per listed Column.
+statement error Expected 2 value\(s\), got 1
+INSERT INTO users (id, name) VALUES (4);

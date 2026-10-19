@@ -100,10 +100,14 @@ pub fn bind(db: &Database, statement: Statement) -> Result<BoundStatement> {
 fn bind_insert(db: &Database, insert: Insert) -> Result<BoundStatement> {
     let table = db.get(&insert.table)?;
     let schema = table.schema();
+    let targets = match insert.columns {
+        Some(names) => resolve_targets(schema, &names)?,
+        None => (0..schema.len()).collect(),
+    };
     let rows = insert
         .rows
         .into_iter()
-        .map(|row| bind_insert_row(schema, row))
+        .map(|row| bind_insert_row(schema, &targets, row))
         .collect::<Result<_>>()?;
     Ok(BoundStatement::Insert(BoundInsert {
         table: table.name().to_string(),
@@ -111,18 +115,34 @@ fn bind_insert(db: &Database, insert: Insert) -> Result<BoundStatement> {
     }))
 }
 
-/// Binds one VALUES row into a full-width row in Schema order.
-fn bind_insert_row(schema: &Schema, row: Vec<Expr>) -> Result<Vec<BoundExpr>> {
-    if row.len() != schema.len() {
+/// The index of each Column in an INSERT's column list. A name may appear
+/// only once.
+fn resolve_targets(schema: &Schema, names: &[String]) -> Result<Vec<usize>> {
+    let mut targets = Vec::new();
+    for name in names {
+        let index = schema.resolve(name)?;
+        if targets.contains(&index) {
+            return Err(DbError::DuplicateColumn { name: name.clone() });
+        }
+        targets.push(index);
+    }
+    Ok(targets)
+}
+
+/// Binds one VALUES row, whose values go to the Columns at `targets`, into a
+/// full-width row in Schema order. Every other Column gets NULL.
+fn bind_insert_row(schema: &Schema, targets: &[usize], row: Vec<Expr>) -> Result<Vec<BoundExpr>> {
+    if row.len() != targets.len() {
         return Err(DbError::ArityMismatch {
-            expected: schema.len(),
+            expected: targets.len(),
             got: row.len(),
         });
     }
-    row.into_iter()
-        .zip(schema.columns())
-        .map(|(expr, column)| bind_insert_value(column, expr))
-        .collect()
+    let mut bound = vec![BoundExpr::Literal(Value::Null); schema.len()];
+    for (expr, &index) in row.into_iter().zip(targets) {
+        bound[index] = bind_insert_value(&schema.columns()[index], expr)?;
+    }
+    Ok(bound)
 }
 
 /// Binds a value for `column`, checking its Data Type. NOT NULL is left to
