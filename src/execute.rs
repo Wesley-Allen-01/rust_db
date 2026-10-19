@@ -1,9 +1,8 @@
 //! The library's entry point for SQL: one Statement in, an Output or an error out.
 
-use crate::ast::DropTable;
-use crate::binder::{BoundCreateTable, BoundSelect, BoundStatement, bind};
+use crate::binder::{BoundSelect, BoundStatement, bind};
 use crate::database::Database;
-use crate::error::{DbError, Result};
+use crate::error::Result;
 use crate::parser::parse;
 use crate::planner::plan_select;
 use crate::schema::ResultColumn;
@@ -52,14 +51,16 @@ pub fn execute(db: &mut Database, sql: &str) -> Result<Output> {
     let statement = parse(sql)?;
     match bind(db, statement)? {
         BoundStatement::Select(select) => run_select(select).map(Output::Rows),
+        // The binder has checked the name; the Database checks it again as a guard.
         BoundStatement::CreateTable(create) => {
-            create_table(db, create)?;
+            db.create_table(create.name, create.schema)?;
             Ok(done("CREATE TABLE"))
         }
         BoundStatement::DropTable(drop) => {
-            drop_table(db, drop)?;
+            db.drop_table(&drop.name)?;
             Ok(done("DROP TABLE"))
         }
+        BoundStatement::NoOp { tag } => Ok(done(tag)),
     }
 }
 
@@ -68,22 +69,6 @@ fn done(tag: &str) -> Output {
     Output::Done {
         tag: tag.to_string(),
         rows_affected: 0,
-    }
-}
-
-/// `IF NOT EXISTS` turns "already exists" into a no-op, as in Postgres.
-fn create_table(db: &mut Database, create: BoundCreateTable) -> Result<()> {
-    match db.create_table(create.name, create.schema) {
-        Err(DbError::TableAlreadyExists { .. }) if create.if_not_exists => Ok(()),
-        result => result,
-    }
-}
-
-/// `IF EXISTS` turns "no such table" into a no-op, as in Postgres.
-fn drop_table(db: &mut Database, drop: DropTable) -> Result<()> {
-    match db.drop_table(&drop.name) {
-        Err(DbError::NoSuchTable { .. }) if drop.if_exists => Ok(()),
-        result => result.map(|_| ()),
     }
 }
 
