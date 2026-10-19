@@ -209,7 +209,7 @@ impl Parser {
         self.expect_keyword(Keyword::Into, "expected INTO")?;
         let table = self.ident()?;
         let columns = if self.eat(&Token::LParen) {
-            Some(self.list(Self::ident)?)
+            Some(self.rest_of_paren_list(Self::ident)?)
         } else {
             None
         };
@@ -228,11 +228,12 @@ impl Parser {
     /// One parenthesised row of a VALUES list.
     fn values_row(&mut self) -> Result<Vec<Expr>> {
         self.expect(&Token::LParen, "expected (")?;
-        self.list(Self::expr)
+        self.rest_of_paren_list(Self::expr)
     }
 
-    /// One or more items separated by commas, then the closing `)`.
-    fn list<T>(&mut self, item: fn(&mut Self) -> Result<T>) -> Result<Vec<T>> {
+    /// The rest of a parenthesised list, after its `(`: one or more items
+    /// separated by commas, then the closing `)`.
+    fn rest_of_paren_list<T>(&mut self, item: fn(&mut Self) -> Result<T>) -> Result<Vec<T>> {
         let mut items = vec![item(self)?];
         while self.eat(&Token::Comma) {
             items.push(item(self)?);

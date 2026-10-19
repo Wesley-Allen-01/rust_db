@@ -74,7 +74,8 @@ fn run_insert(db: &mut Database, insert: BoundInsert) -> Result<Output> {
         .iter()
         .map(|row| row.iter().map(eval).collect::<Result<Vec<Value>>>())
         .collect::<Result<Vec<_>>>()?;
-    let count = db.get_mut(&insert.table)?.insert_all(rows)?.len() as u64;
+    let count = rows.len() as u64;
+    db.get_mut(&insert.table)?.insert_all(rows)?;
     Ok(Output::Done {
         // The 0 is the OID psql reports; it is always 0 in modern Postgres.
         tag: format!("INSERT 0 {count}"),

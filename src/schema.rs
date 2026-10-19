@@ -52,8 +52,22 @@ impl Column {
         self.data_type
     }
 
-    pub fn accepts(&self, value: &Value) -> bool {
-        value.fits(self.data_type)
+    /// `value` as this Column's Data Type, applying Coercion, or the
+    /// Constraint or Data Type it breaks.
+    pub fn coerce(&self, value: Value) -> Result<Value> {
+        if self.not_null && value.is_null() {
+            return Err(DbError::NotNullViolation {
+                column: self.name.clone(),
+            });
+        }
+        let got = value.type_of();
+        value
+            .coerce_to(self.data_type)
+            .ok_or_else(|| DbError::TypeMismatch {
+                column: self.name.clone(),
+                expected: self.data_type,
+                got,
+            })
     }
 }
 
@@ -114,48 +128,19 @@ impl Schema {
             })
     }
 
-    /// Applies Coercion to each Value, then validates the Row. Values that
-    /// can't be coerced are left as they are, for `validate_row` to reject.
-    pub fn coerce_row(&self, mut row: Vec<Value>) -> Result<Vec<Value>> {
-        self.check_arity(&row)?;
-        for (value, col) in row.iter_mut().zip(&self.columns) {
-            if let Some(coerced) = value.clone().coerce_to(col.data_type) {
-                *value = coerced;
-            }
-        }
-        self.validate_row(&row)?;
-        Ok(row)
-    }
-
-    fn check_arity(&self, row: &[Value]) -> Result<()> {
+    /// Checks a Row against the Schema and returns it with Coercion applied:
+    /// arity first, then NOT NULL and Data Type for each Column in turn.
+    pub fn coerce_row(&self, row: Vec<Value>) -> Result<Vec<Value>> {
         if row.len() != self.len() {
             return Err(DbError::ArityMismatch {
                 expected: self.len(),
                 got: row.len(),
             });
         }
-        Ok(())
-    }
-
-    pub fn validate_row(&self, row: &[Value]) -> Result<()> {
-        self.check_arity(row)?;
-
-        for (col, val) in self.columns.iter().zip(row) {
-            if col.not_null && val.is_null() {
-                return Err(DbError::NotNullViolation {
-                    column: col.name.clone(),
-                });
-            }
-            if !col.accepts(val) {
-                return Err(DbError::TypeMismatch {
-                    column: col.name.clone(),
-                    expected: col.data_type,
-                    got: val.type_of(),
-                });
-            }
-        }
-
-        Ok(())
+        row.into_iter()
+            .zip(&self.columns)
+            .map(|(value, col)| col.coerce(value))
+            .collect()
     }
 }
 
@@ -217,14 +202,14 @@ mod tests {
             Value::Float(99.9),
             Value::Bool(true),
         ];
-        assert!(u.validate_row(&row).is_ok());
+        assert!(u.coerce_row(row).is_ok());
     }
 
     #[test]
     fn null_is_allowed() {
         let u = users();
         let row = vec![Value::Null, Value::Null, Value::Null, Value::Null];
-        assert!(u.validate_row(&row).is_ok());
+        assert!(u.coerce_row(row).is_ok());
     }
 
     #[test]
@@ -232,7 +217,7 @@ mod tests {
         let u = users();
         let row = vec![Value::Int(1)];
         assert_eq!(
-            u.validate_row(&row).unwrap_err(),
+            u.coerce_row(row).unwrap_err(),
             DbError::ArityMismatch {
                 expected: 4,
                 got: 1
@@ -251,7 +236,7 @@ mod tests {
         ];
 
         assert_eq!(
-            u.validate_row(&row).unwrap_err(),
+            u.coerce_row(row).unwrap_err(),
             DbError::TypeMismatch {
                 column: "score".to_string(),
                 expected: DataType::Float,
@@ -316,7 +301,7 @@ mod tests {
     fn rejects_null_in_not_null_column() {
         let row = vec![Value::Null, Value::Text("ada".into())];
         assert_eq!(
-            accounts().validate_row(&row).unwrap_err(),
+            accounts().coerce_row(row).unwrap_err(),
             DbError::NotNullViolation {
                 column: "id".to_string()
             }
@@ -326,7 +311,7 @@ mod tests {
     #[test]
     fn not_null_column_accepts_a_value_and_others_still_take_null() {
         let row = vec![Value::Int(1), Value::Null];
-        assert!(accounts().validate_row(&row).is_ok());
+        assert!(accounts().coerce_row(row).is_ok());
     }
 
     #[test]

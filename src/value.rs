@@ -62,11 +62,13 @@ impl Value {
     /// This Value as `target`, applying Coercion (INT to FLOAT) if needed.
     /// NULL becomes any Data Type. `None` if the Value can't become `target`.
     pub fn coerce_to(self, target: DataType) -> Option<Value> {
-        match (self, target) {
-            (Value::Int(i), DataType::Float) => Some(Value::Float(i as f64)),
-            (value, target) if value.fits(target) => Some(value),
-            _ => None,
+        if !self.type_of().is_none_or(|t| t.coerces_to(target)) {
+            return None;
         }
+        Some(match (self, target) {
+            (Value::Int(i), DataType::Float) => Value::Float(i as f64),
+            (value, _) => value,
+        })
     }
 
     pub fn as_int(&self) -> Option<i64> {
