@@ -9,6 +9,8 @@ pub enum Statement {
     CreateTable(CreateTable),
     DropTable(DropTable),
     Insert(Insert),
+    Update(Update),
+    Delete(Delete),
 }
 
 /// `INSERT INTO table [(column, ...)] VALUES (expr, ...), ...`.
@@ -198,6 +200,22 @@ impl fmt::Display for BinaryOp {
             BinaryOp::Concat => "||",
         })
     }
+}
+
+/// `UPDATE table SET column = expr, ... [WHERE expr]`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Update {
+    pub table: String,
+    /// Each target Column with its new value, in the order written.
+    pub assignments: Vec<(String, Expr)>,
+    pub predicate: Option<Expr>,
+}
+
+/// `DELETE FROM table [WHERE expr]`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Delete {
+    pub table: String,
+    pub predicate: Option<Expr>,
 }
 
 #[cfg(test)]

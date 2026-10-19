@@ -1,12 +1,14 @@
 //! The library's entry point for SQL: one Statement in, an Output or an error out.
 
-use crate::binder::{BoundInsert, BoundSelect, BoundStatement, bind};
+use crate::binder::{BoundDelete, BoundInsert, BoundSelect, BoundStatement, BoundUpdate, bind};
 use crate::database::Database;
 use crate::error::Result;
 use crate::eval::eval;
+use crate::operator::PlanRow;
 use crate::parser::parse;
-use crate::planner::plan_select;
+use crate::planner::{plan_matching_rows, plan_select};
 use crate::schema::ResultColumn;
+use crate::table::RowId;
 use crate::value::Value;
 
 /// What a successful Statement produces.
@@ -62,6 +64,8 @@ pub fn execute(db: &mut Database, sql: &str) -> Result<Output> {
             Ok(done("DROP TABLE"))
         }
         BoundStatement::Insert(insert) => run_insert(db, insert),
+        BoundStatement::Update(update) => run_update(db, update),
+        BoundStatement::Delete(delete) => run_delete(db, delete),
         BoundStatement::NoOp { tag } => Ok(done(tag)),
     }
 }
@@ -85,6 +89,53 @@ fn run_insert(db: &mut Database, insert: BoundInsert) -> Result<Output> {
         tag: format!("INSERT 0 {count}"),
         rows_affected: count,
     })
+}
+
+/// Works out every changed Row before updating any, and the Table updates
+/// them all or none, so a failing Row leaves the Table unchanged.
+fn run_update(db: &mut Database, update: BoundUpdate) -> Result<Output> {
+    let rows = {
+        let mut plan = plan_matching_rows(db.get(&update.table)?, update.predicate);
+        let mut rows = Vec::new();
+        while let Some(row) = plan.next()? {
+            // Every SET reads the old Values, so evaluate all before setting any.
+            let mut values = row.values.clone();
+            for (index, expr) in &update.assignments {
+                values[*index] = eval(expr, &row.values)?;
+            }
+            rows.push((row_id(&row), values));
+        }
+        rows
+    };
+    let count = db.get_mut(&update.table)?.update_all(rows)?;
+    Ok(changed("UPDATE", count))
+}
+
+/// Finds every matching Row before deleting any, so the Table isn't changed
+/// while it is being scanned.
+fn run_delete(db: &mut Database, delete: BoundDelete) -> Result<Output> {
+    let ids = {
+        let mut plan = plan_matching_rows(db.get(&delete.table)?, delete.predicate);
+        let mut ids: Vec<RowId> = Vec::new();
+        while let Some(row) = plan.next()? {
+            ids.push(row_id(&row));
+        }
+        ids
+    };
+    let count = db.get_mut(&delete.table)?.delete_all(&ids);
+    Ok(changed("DELETE", count))
+}
+
+fn row_id(row: &PlanRow) -> RowId {
+    row.row_id.expect("a Scanned Row has a Row ID")
+}
+
+/// The Output of a Statement that changed `count` Rows, e.g. "DELETE 3".
+fn changed(command: &str, count: usize) -> Output {
+    Output::Done {
+        tag: format!("{command} {count}"),
+        rows_affected: count as u64,
+    }
 }
 
 /// The Output of a Statement that changes no Rows.
@@ -135,6 +186,15 @@ mod tests {
         };
         assert_eq!(tag, "INSERT 0 2");
         assert_eq!(rows_affected, 2);
+    }
+
+    #[test]
+    fn update_and_delete_report_psql_status_tags() {
+        let mut db = Database::new();
+        execute(&mut db, "CREATE TABLE t (id INT)").unwrap();
+        execute(&mut db, "INSERT INTO t VALUES (1), (2), (3)").unwrap();
+        assert_eq!(tag(&mut db, "UPDATE t SET id = 0 WHERE id > 1"), "UPDATE 2");
+        assert_eq!(tag(&mut db, "DELETE FROM t"), "DELETE 3");
     }
 
     // Here rather than in slt, which can't check Column names.

@@ -6,7 +6,8 @@
 //! the Table instead, which does it for every Row it stores.
 
 use crate::ast::{
-    BinaryOp, CreateTable, DropTable, Expr, Insert, Select, SelectItem, Statement, UnaryOp,
+    BinaryOp, CreateTable, Delete, DropTable, Expr, Insert, Select, SelectItem, Statement, UnaryOp,
+    Update,
 };
 use crate::database::Database;
 use crate::error::{DbError, Result};
@@ -20,6 +21,8 @@ pub enum BoundStatement {
     CreateTable(BoundCreateTable),
     DropTable(BoundDropTable),
     Insert(BoundInsert),
+    Update(BoundUpdate),
+    Delete(BoundDelete),
     /// A Statement that `IF [NOT] EXISTS` turned into nothing. It still
     /// reports its command tag, as in Postgres.
     NoOp {
@@ -64,6 +67,29 @@ pub struct BoundSelect {
     pub columns: Vec<ResultColumn>,
 }
 
+/// An UPDATE of a Table that exists. Every expression, WHERE included, reads
+/// the Row as it was before the UPDATE.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoundUpdate {
+    /// The Table's name as stored, whatever case the query used.
+    pub table: String,
+    /// Each target Column's index with its new value, whose Data Type fits the
+    /// Column, allowing for the Coercion the Table applies. Each Column
+    /// appears at most once.
+    pub assignments: Vec<(usize, BoundExpr)>,
+    /// The WHERE, known to be BOOL (or NULL).
+    pub predicate: Option<BoundExpr>,
+}
+
+/// A DELETE from a Table that exists.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoundDelete {
+    /// The Table's name as stored, whatever case the query used.
+    pub table: String,
+    /// The WHERE, over the Table's Rows, known to be BOOL (or NULL).
+    pub predicate: Option<BoundExpr>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BoundExpr {
     Literal(Value),
@@ -98,6 +124,8 @@ pub fn bind(db: &Database, statement: Statement) -> Result<BoundStatement> {
         Statement::CreateTable(create) => bind_create_table(db, create),
         Statement::DropTable(drop) => bind_drop_table(db, drop),
         Statement::Insert(insert) => bind_insert(db, insert),
+        Statement::Update(update) => bind_update(db, update),
+        Statement::Delete(delete) => bind_delete(db, delete),
     }
 }
 
@@ -144,16 +172,16 @@ fn bind_insert_row(schema: &Schema, targets: &[usize], row: Vec<Expr>) -> Result
     }
     let mut bound = vec![BoundExpr::Literal(Value::Null); schema.len()];
     for (expr, &index) in row.into_iter().zip(targets) {
-        bound[index] = bind_insert_value(&schema.columns()[index], expr)?;
+        bound[index] = bind_column_value(&schema.columns()[index], expr, None)?;
     }
     Ok(bound)
 }
 
-/// Binds a value for `column`, checking its Data Type. NOT NULL is left to
-/// the Table, since an expression such as `NULL + 1` is only known to be NULL
-/// once evaluated.
-fn bind_insert_value(column: &Column, expr: Expr) -> Result<BoundExpr> {
-    let (expr, ty) = bind_expr(expr, None)?;
+/// Binds a value for `column`, read over the Columns of `scope`, checking its
+/// Data Type. NOT NULL is left to the Table, since an expression such as
+/// `NULL + 1` is only known to be NULL once evaluated.
+fn bind_column_value(column: &Column, expr: Expr, scope: Option<&Schema>) -> Result<BoundExpr> {
+    let (expr, ty) = bind_expr(expr, scope)?;
     match ty {
         Some(ty) if !ty.coerces_to(column.data_type()) => Err(DbError::TypeMismatch {
             column: column.name().to_string(),
@@ -162,6 +190,39 @@ fn bind_insert_value(column: &Column, expr: Expr) -> Result<BoundExpr> {
         }),
         _ => Ok(expr),
     }
+}
+
+fn bind_update(db: &Database, update: Update) -> Result<BoundStatement> {
+    let table = db.get(&update.table)?;
+    let schema = table.schema();
+    let names: Vec<String> = update
+        .assignments
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect();
+    let targets = resolve_targets(schema, &names)?;
+    let assignments = update
+        .assignments
+        .into_iter()
+        .zip(targets)
+        .map(|((_, expr), index)| {
+            let value = bind_column_value(&schema.columns()[index], expr, Some(schema))?;
+            Ok((index, value))
+        })
+        .collect::<Result<_>>()?;
+    Ok(BoundStatement::Update(BoundUpdate {
+        table: table.name().to_string(),
+        assignments,
+        predicate: bind_predicate(update.predicate, Some(schema))?,
+    }))
+}
+
+fn bind_delete(db: &Database, delete: Delete) -> Result<BoundStatement> {
+    let table = db.get(&delete.table)?;
+    Ok(BoundStatement::Delete(BoundDelete {
+        table: table.name().to_string(),
+        predicate: bind_predicate(delete.predicate, Some(table.schema()))?,
+    }))
 }
 
 /// The name is checked before the Schema, so `IF NOT EXISTS` on an existing
