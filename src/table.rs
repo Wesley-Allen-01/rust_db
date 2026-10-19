@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::schema::Schema;
 use crate::value::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Index;
 
 /// A Table's permanent handle for one of its Rows (see GLOSSARY.md).
@@ -96,21 +96,30 @@ impl Table {
     }
 
     /// Updates every Row or none: all new values are coerced and validated
-    /// before any Row changes. Row IDs that aren't in the Table are skipped.
-    /// Returns how many Rows were updated.
+    /// before any Row changes. Each Row ID must be in the Table and appear
+    /// once; the caller got them from scanning it. Returns how many Rows were
+    /// updated.
     pub fn update_all(&mut self, rows: Vec<(RowId, Vec<Value>)>) -> Result<usize> {
+        debug_assert!(
+            rows.iter().all(|(id, _)| self.rows.contains_key(id)),
+            "update_all given a Row ID not in the Table"
+        );
+        debug_assert_eq!(
+            rows.iter().map(|(id, _)| id).collect::<BTreeSet<_>>().len(),
+            rows.len(),
+            "update_all given a Row ID twice"
+        );
         let rows = rows
             .into_iter()
             .map(|(id, values)| Ok((id, self.schema.coerce_row(values)?)))
             .collect::<Result<Vec<_>>>()?;
-        let mut updated = 0;
+        let count = rows.len();
         for (id, values) in rows {
             if let Some(row) = self.rows.get_mut(&id) {
                 *row = Row(values);
-                updated += 1;
             }
         }
-        Ok(updated)
+        Ok(count)
     }
 
     pub fn delete(&mut self, id: RowId) -> bool {
@@ -334,5 +343,36 @@ mod tests {
             t.get(0).unwrap().values(),
             &[Value::from("ada"), Value::Float(1.5)]
         );
+        assert_eq!(
+            t.get(1).unwrap().values(),
+            &[Value::from("bob"), Value::Float(2.5)]
+        );
+        assert_eq!(t.len(), 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "not in the Table")]
+    fn update_all_rejects_an_unknown_row_id() {
+        let mut t = scores();
+        let _ = t.update_all(vec![(7, vec!["al".into(), Value::Null])]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Row ID twice")]
+    fn update_all_rejects_a_repeated_row_id() {
+        let mut t = scores();
+        t.insert(vec!["ada".into(), Value::Null]).unwrap();
+        let _ = t.update_all(vec![
+            (0, vec!["al".into(), Value::Null]),
+            (0, vec!["bo".into(), Value::Null]),
+        ]);
+    }
+
+    #[test]
+    fn delete_all_deletes_the_given_rows_and_counts_those_it_found() {
+        let mut u = seed();
+        assert_eq!(u.delete_all(&[0, 2, 99]), 2);
+        let ids: Vec<RowId> = u.iter_with_ids().map(|(id, _)| id).collect();
+        assert_eq!(ids, vec![1]);
     }
 }
