@@ -160,7 +160,7 @@ impl fmt::Display for LexError {
 impl fmt::Display for LexErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LexErrorKind::UnexpectedChar(c) => write!(f, "unexpected character '{c}'"),
+            LexErrorKind::UnexpectedChar(c) => write!(f, "unexpected character `{c}`"),
             LexErrorKind::NumberOutOfRange => write!(f, "numeric literal out of range"),
             LexErrorKind::UnterminatedString => write!(f, "unterminated string literal"),
             LexErrorKind::QuotedIdentifier => {
@@ -598,7 +598,7 @@ mod tests {
         let err = error("select a,\n  @x");
         assert_eq!(err.kind, LexErrorKind::UnexpectedChar('@'));
         assert_eq!(err.pos, at(2, 3));
-        assert_eq!(err.to_string(), "line 2, col 3: unexpected character '@'");
+        assert_eq!(err.to_string(), "line 2, col 3: unexpected character `@`");
     }
 
     #[test]

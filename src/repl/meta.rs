@@ -23,7 +23,7 @@ pub fn run_meta(db: &Database, line: &str) -> Result<MetaOutcome, String> {
         ["\\d", table] => describe_table(db, table).map(MetaOutcome::Print),
         [command @ ("\\q" | "\\dt"), ..] => Err(format!("{command} takes no arguments")),
         ["\\d", ..] => Err("usage: \\d <table>".to_string()),
-        _ => Err(format!("unknown meta command: {}", line.trim())),
+        _ => Err(format!("unknown meta command `{}`", line.trim())),
     }
 }
 
@@ -86,7 +86,7 @@ mod tests {
     fn unknown_command_is_an_error() {
         assert_eq!(
             run_meta(&Database::new(), "\\x"),
-            Err("unknown meta command: \\x".to_string())
+            Err("unknown meta command `\\x`".to_string())
         );
     }
 
