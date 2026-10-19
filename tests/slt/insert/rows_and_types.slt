@@ -36,7 +36,7 @@ statement error division by zero
 INSERT INTO scores VALUES ('hal', 1.0, 1), ('ivy', 1.0, 1 / 0);
 
 # Every row must have the same number of values.
-statement error Expected 3 value\(s\), got 2
+statement error expected 3 values, got 2
 INSERT INTO scores VALUES ('jo', 1.0, 1), ('kim', 1.0);
 
 # Without a FROM there are no Columns for a value to read.

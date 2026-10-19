@@ -21,12 +21,15 @@ INSERT INTO users (ID) VALUES (3);
 statement error no such column `email`
 INSERT INTO users (id, email) VALUES (4, 'x');
 
-statement error Duplicate column name: `id`
+statement error duplicate column name `id`
 INSERT INTO users (id, ID) VALUES (4, 5);
 
 # Each row must give exactly one value per listed Column.
-statement error Expected 2 value\(s\), got 1
+statement error expected 2 values, got 1
 INSERT INTO users (id, name) VALUES (4);
+
+statement error expected 1 value, got 2
+INSERT INTO users (id) VALUES (4, 5);
 
 # Only the three INSERTs that succeeded left Rows behind.
 query ITRB
