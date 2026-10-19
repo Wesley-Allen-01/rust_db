@@ -140,7 +140,7 @@ impl LexError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LexErrorKind {
     UnexpectedChar(char),
-    IntegerOutOfRange,
+    NumberOutOfRange,
     UnterminatedString,
     QuotedIdentifier,
 }
@@ -150,7 +150,7 @@ impl fmt::Display for LexError {
         write!(f, "line {}, col {}: ", self.pos.line, self.pos.col)?;
         match self.kind {
             LexErrorKind::UnexpectedChar(c) => write!(f, "unexpected character '{c}'"),
-            LexErrorKind::IntegerOutOfRange => write!(f, "integer literal out of range"),
+            LexErrorKind::NumberOutOfRange => write!(f, "numeric literal out of range"),
             LexErrorKind::UnterminatedString => write!(f, "unterminated string literal"),
             LexErrorKind::QuotedIdentifier => {
                 write!(f, "double-quoted identifiers are not supported")
@@ -233,18 +233,24 @@ impl Lexer {
             text.push('.');
             text.push_str(&self.digits());
         }
-        // Without this, `123abc` or `1e5` would quietly split into two tokens.
-        if let Some(c) = self.peek().filter(|c| is_word_char(*c)) {
+        // Without this, `123abc`, `1e5` or `1.5.3` would quietly split into
+        // several tokens.
+        let glued = |c: char| is_word_char(c) || (is_float && c == '.');
+        if let Some(c) = self.peek().filter(|c| glued(*c)) {
             return Err(LexError::new(self.pos, LexErrorKind::UnexpectedChar(c)));
         }
+        let out_of_range = || LexError::new(pos, LexErrorKind::NumberOutOfRange);
         if is_float {
-            // Digits and one dot always parse as a float.
-            return Ok(Token::Float(text.parse().unwrap()));
+            // Digits and one dot always parse, but a huge value parses as
+            // infinity, which is not a number the user wrote.
+            let value: f64 = text.parse().unwrap();
+            if !value.is_finite() {
+                return Err(out_of_range());
+            }
+            return Ok(Token::Float(value));
         }
         // Only digits remain, so the parse can fail only by overflowing.
-        text.parse()
-            .map(Token::Integer)
-            .map_err(|_| LexError::new(pos, LexErrorKind::IntegerOutOfRange))
+        text.parse().map(Token::Integer).map_err(|_| out_of_range())
     }
 
     fn text(&mut self, pos: Position) -> Result<Token, LexError> {
@@ -453,13 +459,28 @@ mod tests {
     }
 
     #[test]
+    fn rejects_a_float_too_large_for_64_bits() {
+        let sql = format!("select {}.0", "9".repeat(400));
+        let err = error(&sql);
+        assert_eq!(err.kind, LexErrorKind::NumberOutOfRange);
+        assert_eq!(err.pos, at(1, 8));
+    }
+
+    #[test]
+    fn rejects_a_second_dot_in_a_number() {
+        let err = error("select 1.5.3");
+        assert_eq!(err.kind, LexErrorKind::UnexpectedChar('.'));
+        assert_eq!(err.pos, at(1, 11));
+    }
+
+    #[test]
     fn rejects_an_integer_too_large_for_64_bits() {
         let err = error("select 9223372036854775808");
-        assert_eq!(err.kind, LexErrorKind::IntegerOutOfRange);
+        assert_eq!(err.kind, LexErrorKind::NumberOutOfRange);
         assert_eq!(err.pos, at(1, 8));
         assert_eq!(
             err.to_string(),
-            "line 1, col 8: integer literal out of range"
+            "line 1, col 8: numeric literal out of range"
         );
     }
 
