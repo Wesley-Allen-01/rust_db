@@ -121,6 +121,8 @@ pub struct Position {
 pub struct PositionedToken {
     pub token: Token,
     pub pos: Position,
+    /// Byte offset of the token's first character, for slicing the source.
+    pub offset: usize,
 }
 
 /// Kept separate from `DbError` so the lexer stays free of crate
@@ -183,6 +185,8 @@ struct Lexer {
     i: usize,
     /// Where `chars[i]` sits in the source.
     pos: Position,
+    /// The byte offset of `chars[i]`.
+    offset: usize,
 }
 
 impl Lexer {
@@ -191,6 +195,7 @@ impl Lexer {
             chars: sql.chars().collect(),
             i: 0,
             pos: Position { line: 1, col: 1 },
+            offset: 0,
         }
     }
 
@@ -205,7 +210,7 @@ impl Lexer {
                 self.skip_comment();
                 continue;
             }
-            let pos = self.pos;
+            let (pos, offset) = (self.pos, self.offset);
             let token = if c.is_alphabetic() || c == '_' {
                 self.word()
             } else if c == '\'' {
@@ -215,7 +220,7 @@ impl Lexer {
             } else {
                 self.symbol(c, pos)?
             };
-            out.push(PositionedToken { token, pos });
+            out.push(PositionedToken { token, pos, offset });
         }
         Ok(out)
     }
@@ -350,6 +355,7 @@ impl Lexer {
     }
 
     fn bump(&mut self) {
+        self.offset += self.peek().map_or(0, char::len_utf8);
         if self.peek() == Some('\n') {
             self.pos.line += 1;
             self.pos.col = 1;
@@ -614,6 +620,17 @@ mod tests {
                 Token::Ident("rowid".into()),
             ]
         );
+    }
+
+    #[test]
+    fn tokens_carry_their_byte_offset() {
+        // `é` is two bytes, so offsets and columns part ways after it.
+        let offsets: Vec<usize> = tokenize("é;\n 'ü' x")
+            .unwrap()
+            .into_iter()
+            .map(|t| t.offset)
+            .collect();
+        assert_eq!(offsets, vec![0, 2, 5, 10]);
     }
 
     #[test]

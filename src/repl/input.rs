@@ -57,6 +57,32 @@ impl InputBuffer {
     }
 }
 
+/// Splits complete input into its Statements, each ending at its `;`, as psql
+/// does. The lexer finds the `;`s, so one inside a string or comment doesn't
+/// split. Empty Statements are dropped. Text that doesn't lex comes back whole,
+/// so `execute` reports the error.
+pub fn split_statements(sql: &str) -> Vec<&str> {
+    let Ok(tokens) = tokenize(sql) else {
+        return vec![sql];
+    };
+    let mut statements = Vec::new();
+    // Where the current Statement's first token starts, once it has one.
+    let mut start = None;
+    for token in tokens {
+        if token.token != Token::Semicolon {
+            start.get_or_insert(token.offset);
+        } else if let Some(start) = start.take() {
+            // `;` is one byte, so the Statement ends at its offset.
+            statements.push(&sql[start..=token.offset]);
+        }
+    }
+    // A last Statement without `;` still runs: `execute` doesn't need one.
+    if let Some(start) = start {
+        statements.push(&sql[start..]);
+    }
+    statements
+}
+
 /// The lexer, not a raw `ends_with(';')`, decides, so a `;` inside a string or a
 /// `--` comment doesn't end the Statement. Any lex error except an open string is
 /// final too: more lines can't fix it, so `execute` gets to report it.
@@ -156,6 +182,43 @@ mod tests {
     fn lex_errors_other_than_open_strings_are_sent_for_execute_to_report() {
         let mut buffer = InputBuffer::new();
         assert_eq!(buffer.push("SELECT @"), statement("SELECT @"));
+    }
+
+    #[test]
+    fn splits_a_line_into_its_statements() {
+        assert_eq!(
+            split_statements("SELECT 1; SELECT 2;"),
+            vec!["SELECT 1;", "SELECT 2;"]
+        );
+    }
+
+    #[test]
+    fn split_ignores_semicolons_in_strings_and_comments() {
+        assert_eq!(
+            split_statements("SELECT 'a;b'; -- c; d\nSELECT 2; -- e;"),
+            vec!["SELECT 'a;b';", "SELECT 2;"]
+        );
+    }
+
+    #[test]
+    fn split_keeps_a_multi_line_statement_whole() {
+        assert_eq!(
+            split_statements("SELECT\n  1;\nSELECT 2;"),
+            vec!["SELECT\n  1;", "SELECT 2;"]
+        );
+    }
+
+    #[test]
+    fn split_skips_empty_statements() {
+        assert_eq!(split_statements(";; SELECT 1;;"), vec!["SELECT 1;"]);
+    }
+
+    #[test]
+    fn split_leaves_text_that_does_not_lex_whole_for_execute_to_report() {
+        assert_eq!(
+            split_statements("SELECT 1; SELECT @"),
+            vec!["SELECT 1; SELECT @"]
+        );
     }
 
     #[test]
