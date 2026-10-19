@@ -4,15 +4,28 @@
 //! and every INT-to-FLOAT Coercion is an explicit `ToFloat`, so evaluation never has
 //! to look at types.
 
-use crate::ast::{BinaryOp, Expr, SelectItem, Statement, UnaryOp};
+use crate::ast::{BinaryOp, CreateTable, DropTable, Expr, SelectItem, Statement, UnaryOp};
 use crate::database::Database;
 use crate::error::{DbError, Result};
-use crate::schema::ResultColumn;
+use crate::schema::{Column, ResultColumn, Schema};
 use crate::value::{DataType, Value};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BoundStatement {
     Select(BoundSelect),
+    CreateTable(BoundCreateTable),
+    /// Nothing to check before it runs: whether the Table exists is the
+    /// Database's call at execution time.
+    DropTable(DropTable),
+}
+
+/// A CREATE TABLE whose Columns form a valid Schema. Whether the name is free
+/// is checked when it runs, by the Database.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoundCreateTable {
+    pub name: String,
+    pub schema: Schema,
+    pub if_not_exists: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,7 +73,25 @@ pub fn bind(_db: &Database, statement: Statement) -> Result<BoundStatement> {
             }
             Ok(BoundStatement::Select(BoundSelect { exprs, columns }))
         }
+        Statement::CreateTable(create) => bind_create_table(create).map(BoundStatement::CreateTable),
+        Statement::DropTable(drop) => Ok(BoundStatement::DropTable(drop)),
     }
+}
+
+fn bind_create_table(create: CreateTable) -> Result<BoundCreateTable> {
+    let columns = create
+        .columns
+        .into_iter()
+        .map(|def| {
+            let column = Column::new(def.name, def.data_type);
+            if def.not_null { column.not_null() } else { column }
+        })
+        .collect();
+    Ok(BoundCreateTable {
+        name: create.name,
+        schema: Schema::new(columns)?,
+        if_not_exists: create.if_not_exists,
+    })
 }
 
 fn bind_select_item(item: SelectItem) -> Result<(BoundExpr, ResultColumn)> {

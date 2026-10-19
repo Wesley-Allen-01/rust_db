@@ -3,10 +3,12 @@
 //! Statements are parsed by recursive descent, expressions by precedence
 //! climbing (Pratt parsing). Hand-written per ADR-0001.
 
-use crate::ast::{BinaryOp, Expr, Select, SelectItem, Statement, UnaryOp};
+use crate::ast::{
+    BinaryOp, ColumnDef, CreateTable, DropTable, Expr, Select, SelectItem, Statement, UnaryOp,
+};
 use crate::error::{DbError, Result};
 use crate::lexer::{Keyword, Position, PositionedToken, Token, tokenize};
-use crate::value::Value;
+use crate::value::{DataType, Value};
 
 /// Parses exactly one Statement, optionally ending in `;`.
 ///
@@ -108,15 +110,17 @@ impl Parser {
         if self.eat_keyword(Keyword::Select) {
             return Ok(Statement::Select(self.select()?));
         }
+        if self.eat_keyword(Keyword::Create) {
+            return Ok(Statement::CreateTable(self.create_table()?));
+        }
+        if self.eat_keyword(Keyword::Drop) {
+            return Ok(Statement::DropTable(self.drop_table()?));
+        }
         match self.peek() {
             // Statements whose slices have not landed yet.
-            Some(Token::Keyword(
-                Keyword::Create
-                | Keyword::Drop
-                | Keyword::Insert
-                | Keyword::Update
-                | Keyword::Delete,
-            )) => Err(DbError::NotYetSupported),
+            Some(Token::Keyword(Keyword::Insert | Keyword::Update | Keyword::Delete)) => {
+                Err(DbError::NotYetSupported)
+            }
             _ => Err(self.error("expected a statement")),
         }
     }
@@ -128,6 +132,72 @@ impl Parser {
             items.push(self.select_item()?);
         }
         Ok(Select { items })
+    }
+
+    /// The part of a CREATE TABLE after the `CREATE` keyword.
+    fn create_table(&mut self) -> Result<CreateTable> {
+        self.expect_keyword(Keyword::Table, "expected TABLE")?;
+        let if_not_exists = self.eat_keyword(Keyword::If);
+        if if_not_exists {
+            self.expect_keyword(Keyword::Not, "expected NOT")?;
+            self.expect_keyword(Keyword::Exists, "expected EXISTS")?;
+        }
+        let name = self.ident()?;
+        self.expect(&Token::LParen, "expected (")?;
+        // An empty list parses, so the Schema can report it as an empty Schema.
+        let mut columns = Vec::new();
+        if !self.eat(&Token::RParen) {
+            columns.push(self.column_def()?);
+            while self.eat(&Token::Comma) {
+                columns.push(self.column_def()?);
+            }
+            self.expect(&Token::RParen, "expected , or )")?;
+        }
+        Ok(CreateTable {
+            name,
+            columns,
+            if_not_exists,
+        })
+    }
+
+    fn column_def(&mut self) -> Result<ColumnDef> {
+        let name = self.ident()?;
+        let data_type = self.data_type()?;
+        let not_null = self.eat_keyword(Keyword::Not);
+        if not_null {
+            self.expect_keyword(Keyword::Null, "expected NULL")?;
+        }
+        Ok(ColumnDef {
+            name,
+            data_type,
+            not_null,
+        })
+    }
+
+    fn data_type(&mut self) -> Result<DataType> {
+        let data_type = match self.peek() {
+            Some(Token::Keyword(Keyword::Int)) => DataType::Int,
+            Some(Token::Keyword(Keyword::Float)) => DataType::Float,
+            Some(Token::Keyword(Keyword::Text)) => DataType::Text,
+            Some(Token::Keyword(Keyword::Bool)) => DataType::Bool,
+            Some(Token::Ident(name)) => {
+                return Err(self.error(&format!("unknown data type `{name}`")));
+            }
+            _ => return Err(self.error("expected a data type")),
+        };
+        self.i += 1;
+        Ok(data_type)
+    }
+
+    /// The part of a DROP TABLE after the `DROP` keyword.
+    fn drop_table(&mut self) -> Result<DropTable> {
+        self.expect_keyword(Keyword::Table, "expected TABLE")?;
+        let if_exists = self.eat_keyword(Keyword::If);
+        if if_exists {
+            self.expect_keyword(Keyword::Exists, "expected EXISTS")?;
+        }
+        let name = self.ident()?;
+        Ok(DropTable { name, if_exists })
     }
 
     fn select_item(&mut self) -> Result<SelectItem> {
@@ -267,6 +337,18 @@ impl Parser {
 
     fn eat_keyword(&mut self, keyword: Keyword) -> bool {
         self.eat(&Token::Keyword(keyword))
+    }
+
+    fn expect(&mut self, expected: &Token, message: &str) -> Result<()> {
+        if self.eat(expected) {
+            Ok(())
+        } else {
+            Err(self.error(message))
+        }
+    }
+
+    fn expect_keyword(&mut self, keyword: Keyword, message: &str) -> Result<()> {
+        self.expect(&Token::Keyword(keyword), message)
     }
 
     fn error(&self, message: &str) -> DbError {
