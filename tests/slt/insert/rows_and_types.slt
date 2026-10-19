@@ -1,0 +1,59 @@
+# Multi-row INSERT, expressions as values, Coercion and type errors.
+
+statement ok
+CREATE TABLE scores (name TEXT NOT NULL, score FLOAT, wins INT);
+
+statement count 3
+INSERT INTO scores VALUES ('ada', 1.5, 1), ('bob', 2.5, 2), ('cy', NULL, NULL);
+
+# Values are full expressions, evaluated without a Row.
+statement count 1
+INSERT INTO scores VALUES ('d' || 'ee', 0.5 * 3, 10 / 3);
+
+# Coercion: an INT going into a FLOAT Column becomes a FLOAT.
+statement count 2
+INSERT INTO scores (name, score) VALUES ('eve', 7), ('fay', 2 + 3);
+
+# Every other mismatch is a type error, even the other way round.
+statement error column `wins` expects INT, got FLOAT
+INSERT INTO scores (name, wins) VALUES ('gus', 1.5);
+
+statement error column `name` expects TEXT, got INT
+INSERT INTO scores (name) VALUES (1);
+
+statement error column `score` expects FLOAT, got BOOL
+INSERT INTO scores (name, score) VALUES ('gus', true);
+
+# An expression only known to be NULL at run time still meets NOT NULL.
+statement error column `name` is NOT NULL, got NULL
+INSERT INTO scores (name) VALUES (NULL || 'x');
+
+# Errors from evaluating a value fail the whole Statement.
+statement error division by zero
+INSERT INTO scores VALUES ('hal', 1.0, 1), ('ivy', 1.0, 1 / 0);
+
+# Every row must have the same number of values.
+statement error Expected 3 value\(s\), got 2
+INSERT INTO scores VALUES ('jo', 1.0, 1), ('kim', 1.0);
+
+# Without a FROM there are no Columns for a value to read.
+statement error no such column `score`
+INSERT INTO scores VALUES ('lu', score, 1);
+
+statement error no such table `nope`
+INSERT INTO nope VALUES (1);
+
+statement error line 1, col 8: expected INTO
+INSERT scores VALUES ('x', 1.0, 1);
+
+statement error line 1, col 20: expected VALUES
+INSERT INTO scores SELECT 1;
+
+statement error line 1, col 21: expected a name
+INSERT INTO scores () VALUES ('x');
+
+statement error line 1, col 28: expected an expression
+INSERT INTO scores VALUES ();
+
+statement error line 1, col 34: expected , or \)
+INSERT INTO scores VALUES ('x', 1

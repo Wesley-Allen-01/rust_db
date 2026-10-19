@@ -1,8 +1,9 @@
 //! The library's entry point for SQL: one Statement in, an Output or an error out.
 
-use crate::binder::{BoundSelect, BoundStatement, bind};
+use crate::binder::{BoundInsert, BoundSelect, BoundStatement, bind};
 use crate::database::Database;
 use crate::error::Result;
+use crate::eval::eval;
 use crate::parser::parse;
 use crate::planner::plan_select;
 use crate::schema::ResultColumn;
@@ -60,8 +61,26 @@ pub fn execute(db: &mut Database, sql: &str) -> Result<Output> {
             db.drop_table(&drop.name)?;
             Ok(done("DROP TABLE"))
         }
+        BoundStatement::Insert(insert) => run_insert(db, insert),
         BoundStatement::NoOp { tag } => Ok(done(tag)),
     }
+}
+
+/// Evaluates every row before inserting any, and the Table inserts them all
+/// or none, so a failing row leaves the Table unchanged.
+fn run_insert(db: &mut Database, insert: BoundInsert) -> Result<Output> {
+    let rows = insert
+        .rows
+        .iter()
+        .map(|row| row.iter().map(eval).collect::<Result<Vec<Value>>>())
+        .collect::<Result<Vec<_>>>()?;
+    let count = rows.len() as u64;
+    db.get_mut(&insert.table)?.insert_all(rows)?;
+    Ok(Output::Done {
+        // The 0 is the OID psql reports; it is always 0 in modern Postgres.
+        tag: format!("INSERT 0 {count}"),
+        rows_affected: count,
+    })
 }
 
 /// The Output of a Statement that changes no Rows.
@@ -100,6 +119,44 @@ mod tests {
         let mut db = Database::new();
         assert_eq!(tag(&mut db, "CREATE TABLE t (id INT)"), "CREATE TABLE");
         assert_eq!(tag(&mut db, "DROP TABLE t"), "DROP TABLE");
+    }
+
+    #[test]
+    fn insert_reports_a_psql_status_tag_and_row_count() {
+        let mut db = Database::new();
+        execute(&mut db, "CREATE TABLE t (id INT)").unwrap();
+        let output = execute(&mut db, "INSERT INTO t VALUES (1), (2)").unwrap();
+        let Output::Done { tag, rows_affected } = output else {
+            panic!("expected Done");
+        };
+        assert_eq!(tag, "INSERT 0 2");
+        assert_eq!(rows_affected, 2);
+    }
+
+    // Checked through Table until SELECT ... FROM can show the Rows.
+    #[test]
+    fn a_failing_last_row_leaves_the_table_empty() {
+        let mut db = Database::new();
+        execute(&mut db, "CREATE TABLE t (id INT NOT NULL)").unwrap();
+        for sql in [
+            "INSERT INTO t VALUES (1), (2), (NULL)",
+            "INSERT INTO t VALUES (1), (2), (1 / 0)",
+        ] {
+            assert!(execute(&mut db, sql).is_err(), "{sql}");
+            assert_eq!(db.get("t").unwrap().len(), 0, "{sql}");
+        }
+    }
+
+    #[test]
+    fn insert_stores_rows_in_schema_order_with_coercion() {
+        let mut db = Database::new();
+        execute(&mut db, "CREATE TABLE t (id INT, name TEXT, score FLOAT)").unwrap();
+        execute(&mut db, "INSERT INTO t (score, id) VALUES (3, 1)").unwrap();
+        let rows: Vec<&[Value]> = db.get("t").unwrap().iter().map(|r| r.values()).collect();
+        assert_eq!(
+            rows,
+            vec![&[Value::Int(1), Value::Null, Value::Float(3.0)][..]]
+        );
     }
 
     // Here rather than in slt, which can't check Column names.

@@ -8,6 +8,14 @@ pub enum DataType {
     Bool,
 }
 
+impl DataType {
+    /// Whether a Value of this Data Type can stand where `target` is needed:
+    /// the same Data Type, or INT going to FLOAT (Coercion).
+    pub fn coerces_to(self, target: DataType) -> bool {
+        self == target || (self, target) == (DataType::Int, DataType::Float)
+    }
+}
+
 impl fmt::Display for DataType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = match self {
@@ -44,11 +52,16 @@ impl Value {
         matches!(self, Value::Null)
     }
 
-    pub fn fits(&self, expected: DataType) -> bool {
-        match self.type_of() {
-            None => true,
-            Some(actual) => actual == expected,
+    /// This Value as `target`, applying Coercion (INT to FLOAT) if needed.
+    /// NULL becomes any Data Type. `None` if the Value can't become `target`.
+    pub fn coerce_to(self, target: DataType) -> Option<Value> {
+        if !self.type_of().is_none_or(|t| t.coerces_to(target)) {
+            return None;
         }
+        Some(match (self, target) {
+            (Value::Int(i), DataType::Float) => Value::Float(i as f64),
+            (value, _) => value,
+        })
     }
 
     pub fn as_int(&self) -> Option<i64> {
@@ -133,19 +146,6 @@ mod tests {
         assert_eq!(Value::Null.type_of(), None);
     }
 
-    #[test]
-    fn null_fits_any_column() {
-        assert!(Value::Null.fits(DataType::Int));
-        assert!(Value::Null.fits(DataType::Text));
-    }
-
-    #[test]
-    fn type_mismatch_is_rejected() {
-        assert!(Value::Int(1).fits(DataType::Int));
-        assert!(!Value::Int(2).fits(DataType::Text));
-        assert!(!Value::Float(3.2).fits(DataType::Int));
-    }
-
     // Rust equality is structural, for tests and lookups. SQL comparison
     // (Coercion, NULL is unknown) lives in the evaluator.
     #[test]
@@ -154,6 +154,28 @@ mod tests {
         assert_ne!(Value::Text("1".into()), Value::Int(1));
         assert_eq!(Value::Null, Value::Null);
         assert_eq!(Value::Text("a".into()), Value::Text("a".into()));
+    }
+
+    #[test]
+    fn coercion_turns_an_int_into_a_float() {
+        assert_eq!(
+            Value::Int(3).coerce_to(DataType::Float),
+            Some(Value::Float(3.0))
+        );
+    }
+
+    #[test]
+    fn coercion_leaves_matching_values_and_null_alone() {
+        assert_eq!(Value::Int(3).coerce_to(DataType::Int), Some(Value::Int(3)));
+        assert_eq!(Value::Null.coerce_to(DataType::Float), Some(Value::Null));
+    }
+
+    #[test]
+    fn coercion_is_only_int_to_float() {
+        assert_eq!(Value::Float(3.0).coerce_to(DataType::Int), None);
+        assert_eq!(Value::Int(1).coerce_to(DataType::Text), None);
+        assert_eq!(Value::Text("1".into()).coerce_to(DataType::Int), None);
+        assert_eq!(Value::Bool(true).coerce_to(DataType::Int), None);
     }
 
     #[test]

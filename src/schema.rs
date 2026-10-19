@@ -52,8 +52,22 @@ impl Column {
         self.data_type
     }
 
-    pub fn accepts(&self, value: &Value) -> bool {
-        value.fits(self.data_type)
+    /// `value` as this Column's Data Type, applying Coercion, or the
+    /// Constraint or Data Type it breaks.
+    pub fn coerce(&self, value: Value) -> Result<Value> {
+        if self.not_null && value.is_null() {
+            return Err(DbError::NotNullViolation {
+                column: self.name.clone(),
+            });
+        }
+        let got = value.type_of();
+        value
+            .coerce_to(self.data_type)
+            .ok_or_else(|| DbError::TypeMismatch {
+                column: self.name.clone(),
+                expected: self.data_type,
+                got,
+            })
     }
 }
 
@@ -114,30 +128,19 @@ impl Schema {
             })
     }
 
-    pub fn validate_row(&self, row: &[Value]) -> Result<()> {
+    /// Checks a Row against the Schema and returns it with Coercion applied:
+    /// arity first, then NOT NULL and Data Type for each Column in turn.
+    pub fn coerce_row(&self, row: Vec<Value>) -> Result<Vec<Value>> {
         if row.len() != self.len() {
             return Err(DbError::ArityMismatch {
                 expected: self.len(),
                 got: row.len(),
             });
         }
-
-        for (col, val) in self.columns.iter().zip(row) {
-            if col.not_null && val.is_null() {
-                return Err(DbError::NotNullViolation {
-                    column: col.name.clone(),
-                });
-            }
-            if !col.accepts(val) {
-                return Err(DbError::TypeMismatch {
-                    column: col.name.clone(),
-                    expected: col.data_type,
-                    got: val.type_of(),
-                });
-            }
-        }
-
-        Ok(())
+        row.into_iter()
+            .zip(&self.columns)
+            .map(|(value, col)| col.coerce(value))
+            .collect()
     }
 }
 
@@ -199,14 +202,14 @@ mod tests {
             Value::Float(99.9),
             Value::Bool(true),
         ];
-        assert!(u.validate_row(&row).is_ok());
+        assert!(u.coerce_row(row).is_ok());
     }
 
     #[test]
     fn null_is_allowed() {
         let u = users();
         let row = vec![Value::Null, Value::Null, Value::Null, Value::Null];
-        assert!(u.validate_row(&row).is_ok());
+        assert!(u.coerce_row(row).is_ok());
     }
 
     #[test]
@@ -214,7 +217,7 @@ mod tests {
         let u = users();
         let row = vec![Value::Int(1)];
         assert_eq!(
-            u.validate_row(&row).unwrap_err(),
+            u.coerce_row(row).unwrap_err(),
             DbError::ArityMismatch {
                 expected: 4,
                 got: 1
@@ -228,18 +231,62 @@ mod tests {
         let row = vec![
             Value::Int(1),
             Value::Text("Wesley".into()),
-            Value::Int(100),
+            Value::Text("high".into()),
             Value::Bool(false),
         ];
 
         assert_eq!(
-            u.validate_row(&row).unwrap_err(),
+            u.coerce_row(row).unwrap_err(),
             DbError::TypeMismatch {
                 column: "score".to_string(),
                 expected: DataType::Float,
-                got: Some(DataType::Int)
+                got: Some(DataType::Text)
             }
         )
+    }
+
+    #[test]
+    fn coerce_row_turns_an_int_into_a_float_column_into_a_float() {
+        let row = vec![
+            Value::Int(1),
+            Value::Text("Wesley".into()),
+            Value::Int(100),
+            Value::Bool(false),
+        ];
+        assert_eq!(
+            users().coerce_row(row),
+            Ok(vec![
+                Value::Int(1),
+                Value::Text("Wesley".into()),
+                Value::Float(100.0),
+                Value::Bool(false),
+            ])
+        );
+    }
+
+    #[test]
+    fn coerce_row_rejects_extra_values() {
+        let row = vec![Value::Null; 5];
+        assert_eq!(
+            users().coerce_row(row).unwrap_err(),
+            DbError::ArityMismatch {
+                expected: 4,
+                got: 5
+            }
+        );
+    }
+
+    #[test]
+    fn coerce_row_still_rejects_other_mismatches() {
+        let row = vec![Value::Float(1.0), Value::Null, Value::Null, Value::Null];
+        assert_eq!(
+            users().coerce_row(row).unwrap_err(),
+            DbError::TypeMismatch {
+                column: "id".to_string(),
+                expected: DataType::Int,
+                got: Some(DataType::Float)
+            }
+        );
     }
 
     fn accounts() -> Schema {
@@ -254,7 +301,7 @@ mod tests {
     fn rejects_null_in_not_null_column() {
         let row = vec![Value::Null, Value::Text("ada".into())];
         assert_eq!(
-            accounts().validate_row(&row).unwrap_err(),
+            accounts().coerce_row(row).unwrap_err(),
             DbError::NotNullViolation {
                 column: "id".to_string()
             }
@@ -264,7 +311,7 @@ mod tests {
     #[test]
     fn not_null_column_accepts_a_value_and_others_still_take_null() {
         let row = vec![Value::Int(1), Value::Null];
-        assert!(accounts().validate_row(&row).is_ok());
+        assert!(accounts().coerce_row(row).is_ok());
     }
 
     #[test]
