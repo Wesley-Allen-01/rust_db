@@ -18,16 +18,16 @@ Ctrl-C abandons an unfinished Statement. `\q` or Ctrl-D quits.
 | `\d <table>` | Describes a Table's Columns |
 | `\q` | Quits |
 
-A Meta Command typed mid-Statement runs at once, and the unfinished Statement stays buffered.
+A Meta Command must start its own line. Typed mid-Statement, it runs at once and the unfinished Statement stays buffered. After SQL on the same line, as in `SELECT 1; \dt`, it is not a Meta Command: the SQL before it runs, then the `\` is a syntax error.
 
 ## Supported SQL
 
 - `CREATE TABLE [IF NOT EXISTS] t (col TYPE [NOT NULL], ...)` and `DROP TABLE [IF EXISTS] t`
 - `INSERT INTO t [(col, ...)] VALUES (...), (...)`
-- `SELECT expr [AS name], ... | * [FROM t] [WHERE ...] [ORDER BY expr [ASC|DESC], ...] [LIMIT n] [OFFSET m]`
+- `SELECT expr [AS name], ... | * [FROM t] [WHERE ...] [ORDER BY key [ASC|DESC], ...] [LIMIT n] [OFFSET m]`, where an ORDER BY key is an expression, a Result Set Column's name or alias, or its position (`ORDER BY 2`)
 - `UPDATE t SET col = expr, ... [WHERE ...]` and `DELETE FROM t [WHERE ...]`
 
-Data Types are `INT`, `FLOAT`, `TEXT` and `BOOL`. Expressions support `+ - * / %`, `||`, `= <> < <= > >=`, `AND OR NOT` and `IS [NOT] NULL`.
+Data Types are `INT`, `FLOAT`, `TEXT` and `BOOL`. Literals are `42`, `2.5`, `'text'` (with `''` for a quote), `TRUE`, `FALSE` and `NULL`. Expressions support `+ - * / %`, unary `-`, `||`, `= <> < <= > >=`, `AND OR NOT`, `IS [NOT] NULL` and parentheses.
 
 Typing is strict, as in Postgres: the only Coercion is INT to FLOAT, and any other mismatch is an error. NULL follows three-valued logic, and WHERE keeps a Row only when it is TRUE. Each Statement takes full effect or none. Names are case-insensitive, and `--` starts a comment.
 
