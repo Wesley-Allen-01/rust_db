@@ -122,11 +122,8 @@ fn run_delete(db: &mut Database, delete: BoundDelete) -> Result<Output> {
         }
         ids
     };
-    let table = db.get_mut(&delete.table)?;
-    for &id in &ids {
-        table.delete(id);
-    }
-    Ok(changed("DELETE", ids.len()))
+    let count = db.get_mut(&delete.table)?.delete_all(&ids);
+    Ok(changed("DELETE", count))
 }
 
 fn row_id(row: &PlanRow) -> RowId {

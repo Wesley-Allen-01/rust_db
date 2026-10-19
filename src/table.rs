@@ -95,17 +95,6 @@ impl Table {
         id
     }
 
-    pub fn update(&mut self, id: RowId, values: Vec<Value>) -> Result<bool> {
-        let values = self.schema.coerce_row(values)?;
-        match self.rows.get_mut(&id) {
-            Some(row) => {
-                *row = Row(values);
-                Ok(true)
-            }
-            None => Ok(false),
-        }
-    }
-
     /// Updates every Row or none: all new values are coerced and validated
     /// before any Row changes. Row IDs that aren't in the Table are skipped.
     /// Returns how many Rows were updated.
@@ -126,6 +115,11 @@ impl Table {
 
     pub fn delete(&mut self, id: RowId) -> bool {
         self.rows.remove(&id).is_some()
+    }
+
+    /// Deletes every Row with one of these IDs. Returns how many there were.
+    pub fn delete_all(&mut self, ids: &[RowId]) -> usize {
+        ids.iter().filter(|&&id| self.delete(id)).count()
     }
 
     pub fn get(&self, id: RowId) -> Option<&Row> {
@@ -289,15 +283,6 @@ mod tests {
 
         let ids: Vec<usize> = u.iter_with_ids().map(|(id, _)| id).collect();
         assert_eq!(ids, vec![0, 2]);
-    }
-
-    #[test]
-    fn update_performs_modification_in_place() {
-        let mut u = seed();
-        assert_eq!(
-            u.update(1, vec![1.into(), "jonny".into(), true.into()]),
-            Ok(true)
-        );
     }
 
     #[test]

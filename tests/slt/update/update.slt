@@ -24,8 +24,8 @@ SELECT * FROM users;
 statement count 0
 UPDATE users SET name = 'x' WHERE id > 100;
 
-# SET can read the Row. Every SET sees the Row as it was before the UPDATE,
-# so the swap works. Names are case-insensitive, and an INT is Coerced to FLOAT.
+# SET can read the Row. Names are case-insensitive, and an INT is Coerced
+# to FLOAT.
 statement count 3
 UPDATE USERS SET ID = id + 10, score = Id;
 
@@ -99,4 +99,14 @@ query II
 SELECT * FROM pairs;
 ----
 1 10
+2 NULL
+
+# Every SET sees the Row as it was before the UPDATE, so values swap.
+statement count 1
+UPDATE pairs SET a = b, b = a WHERE a = 1;
+
+query II
+SELECT * FROM pairs;
+----
+10 1
 2 NULL
