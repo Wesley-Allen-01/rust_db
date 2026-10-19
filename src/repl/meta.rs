@@ -1,7 +1,7 @@
 //! Meta Commands: backslash-prefixed REPL instructions that are not SQL.
 
 use crate::database::Database;
-use crate::execute::ResultSet;
+use crate::execute::{ResultColumn, ResultSet};
 use crate::repl::render::render_table;
 use crate::value::{DataType, Value};
 
@@ -36,8 +36,7 @@ fn list_tables(db: &Database) -> String {
         .map(|name| vec![Value::Text(name.to_string())])
         .collect();
     render_table(&ResultSet {
-        columns: vec!["Name".to_string()],
-        types: vec![DataType::Text],
+        columns: vec![ResultColumn::new("Name", DataType::Text)],
         rows,
     })
 }
@@ -56,8 +55,10 @@ fn describe_table(db: &Database, name: &str) -> Result<String, String> {
         })
         .collect();
     let listing = ResultSet {
-        columns: vec!["Column".to_string(), "Type".to_string()],
-        types: vec![DataType::Text, DataType::Text],
+        columns: vec![
+            ResultColumn::new("Column", DataType::Text),
+            ResultColumn::new("Type", DataType::Text),
+        ],
         rows,
     };
     Ok(format!(

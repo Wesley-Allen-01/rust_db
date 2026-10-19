@@ -159,12 +159,16 @@ impl Parser {
     /// `min_power`. A looser operator ends it and is left for the caller.
     fn expr_binding(&mut self, min_power: u8) -> Result<Expr> {
         let mut left = self.prefix()?;
+        // Whether `left` is a comparison built in this loop. One from inside
+        // parentheses doesn't count: `(a = b) = c` is fine.
+        let mut left_is_comparison = false;
         loop {
             if self.peek() == Some(&Token::Keyword(Keyword::Is)) {
                 if power::IS < min_power {
                     break;
                 }
                 left = self.is_null(left)?;
+                left_is_comparison = false;
                 continue;
             }
             let Some(op) = self.peek().and_then(binary_op) else {
@@ -174,6 +178,11 @@ impl Parser {
             if power < min_power {
                 break;
             }
+            // Comparisons are non-associative, as in Postgres.
+            if op.is_comparison() && left_is_comparison {
+                return Err(self.error("comparison operators cannot be chained"));
+            }
+            left_is_comparison = op.is_comparison();
             self.i += 1;
             // `+ 1` makes operators of equal power left-associative.
             let right = self.expr_binding(power + 1)?;
@@ -265,5 +274,23 @@ impl Parser {
             pos: self.pos(),
             message: message.to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn error_pos(sql: &str) -> Position {
+        match parse(sql) {
+            Err(DbError::Syntax { pos, .. }) => pos,
+            other => panic!("expected a syntax error, got {other:?}"),
+        }
+    }
+
+    // Here because in slt a whitespace-only line ends the record.
+    #[test]
+    fn end_of_input_counts_lines_and_trailing_spaces() {
+        assert_eq!(error_pos("SELECT 1,\n  "), Position { line: 2, col: 3 });
     }
 }

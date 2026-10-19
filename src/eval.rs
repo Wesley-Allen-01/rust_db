@@ -3,7 +3,7 @@
 //! bound, `eval` will also take the Row they read from.
 //!
 //! The binder has already checked Data Types and inserted every Coercion, so
-//! both operands of a binary operator always hold the same kind of Value (or
+//! both operands of a binary operator always hold Values of the same Data Type (or
 //! NULL). Any other combination is a binder bug.
 
 use crate::ast::{BinaryOp, UnaryOp};

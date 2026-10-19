@@ -46,7 +46,11 @@ impl sqllogictest::DB for Engine {
         match execute(&mut self.db, sql)? {
             Output::Done { rows_affected, .. } => Ok(DBOutput::StatementComplete(rows_affected)),
             Output::Rows(result) => Ok(DBOutput::Rows {
-                types: result.types.iter().copied().map(SltType).collect(),
+                types: result
+                    .columns
+                    .iter()
+                    .map(|c| SltType(c.data_type))
+                    .collect(),
                 rows: result
                     .text_rows()
                     .into_iter()

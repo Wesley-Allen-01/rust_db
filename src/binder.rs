@@ -1,12 +1,13 @@
 //! Checks a parsed Statement's names and Data Types before anything runs (ADR-0003).
 //!
 //! The output is a bound Statement: every expression is known to be well-typed,
-//! and every INT-to-FLOAT Coercion is an explicit node, so evaluation never has
+//! and every INT-to-FLOAT Coercion is an explicit `ToFloat`, so evaluation never has
 //! to look at types.
 
 use crate::ast::{BinaryOp, Expr, SelectItem, Statement, UnaryOp};
 use crate::database::Database;
 use crate::error::{DbError, Result};
+use crate::execute::ResultColumn;
 use crate::value::{DataType, Value};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -17,14 +18,8 @@ pub enum BoundStatement {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BoundSelect {
     pub exprs: Vec<BoundExpr>,
-    pub columns: Vec<OutputColumn>,
-}
-
-/// A Result Set Column: its name and Data Type.
-#[derive(Debug, Clone, PartialEq)]
-pub struct OutputColumn {
-    pub name: String,
-    pub data_type: DataType,
+    /// One per expression, in the same order.
+    pub columns: Vec<ResultColumn>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -68,7 +63,7 @@ pub fn bind(_db: &Database, statement: Statement) -> Result<BoundStatement> {
     }
 }
 
-fn bind_select_item(item: SelectItem) -> Result<(BoundExpr, OutputColumn)> {
+fn bind_select_item(item: SelectItem) -> Result<(BoundExpr, ResultColumn)> {
     let name = match (&item.alias, &item.expr) {
         (Some(alias), _) => alias.clone(),
         (None, Expr::Column(name)) => name.clone(),
@@ -79,7 +74,7 @@ fn bind_select_item(item: SelectItem) -> Result<(BoundExpr, OutputColumn)> {
     // A Column that is only ever NULL gets TEXT, as Postgres does for its
     // "unknown" type.
     let data_type = ty.unwrap_or(DataType::Text);
-    Ok((expr, OutputColumn { name, data_type }))
+    Ok((expr, ResultColumn::new(name, data_type)))
 }
 
 fn bind_expr(expr: Expr) -> Result<(BoundExpr, ExprType)> {
@@ -108,7 +103,7 @@ fn bind_unary(op: UnaryOp, operand: Expr) -> Result<(BoundExpr, ExprType)> {
     let (operand, ty) = bind_expr(operand)?;
     let result_ty = match op {
         UnaryOp::Neg if is_numeric(ty) => ty,
-        UnaryOp::Not if is(ty, DataType::Bool) => Some(DataType::Bool),
+        UnaryOp::Not if fits(ty, DataType::Bool) => Some(DataType::Bool),
         _ => return Err(DbError::UnaryTypeMismatch { op, operand: ty }),
     };
     let bound = BoundExpr::Unary {
@@ -126,7 +121,7 @@ fn bind_binary(op: BinaryOp, left: Expr, right: Expr) -> Result<(BoundExpr, Expr
         left: left_ty,
         right: right_ty,
     };
-    let both = |data_type| is(left_ty, data_type) && is(right_ty, data_type);
+    let both = |data_type| fits(left_ty, data_type) && fits(right_ty, data_type);
 
     let (left, right, ty) = match op {
         BinaryOp::And | BinaryOp::Or if both(DataType::Bool) => (left, right, Some(DataType::Bool)),
@@ -172,7 +167,7 @@ fn to_float(expr: BoundExpr) -> BoundExpr {
 
 /// Whether an operand of type `ty` can stand where `expected` is needed.
 /// NULL can stand anywhere.
-fn is(ty: ExprType, expected: DataType) -> bool {
+fn fits(ty: ExprType, expected: DataType) -> bool {
     ty.is_none_or(|t| t == expected)
 }
 

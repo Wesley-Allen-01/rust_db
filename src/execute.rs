@@ -27,10 +27,24 @@ pub enum Output {
 /// (e.g. a projection or an aggregate) need not belong to any Table.
 #[derive(Debug, Clone)]
 pub struct ResultSet {
-    pub columns: Vec<String>,
-    /// One per Column, in the same order as `columns`.
-    pub types: Vec<DataType>,
+    pub columns: Vec<ResultColumn>,
     pub rows: Vec<Vec<Value>>,
+}
+
+/// A Result Set Column: its name and Data Type, known before any Row runs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResultColumn {
+    pub name: String,
+    pub data_type: DataType,
+}
+
+impl ResultColumn {
+    pub fn new(name: impl Into<String>, data_type: DataType) -> Self {
+        ResultColumn {
+            name: name.into(),
+            data_type,
+        }
+    }
 }
 
 impl ResultSet {
@@ -56,76 +70,33 @@ pub fn execute(db: &mut Database, sql: &str) -> Result<Output> {
 }
 
 fn run_select(select: BoundSelect) -> Result<ResultSet> {
-    let (columns, types) = select
-        .columns
-        .iter()
-        .map(|column| (column.name.clone(), column.data_type))
-        .unzip();
+    let columns = select.columns.clone();
     let mut plan = plan_select(select);
     let mut rows = Vec::new();
     while let Some(row) = plan.next()? {
         rows.push(row);
     }
-    Ok(ResultSet {
-        columns,
-        types,
-        rows,
-    })
+    Ok(ResultSet { columns, rows })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::DbError;
 
-    fn query(sql: &str) -> ResultSet {
-        match execute(&mut Database::new(), sql).unwrap() {
-            Output::Rows(result) => result,
-            other => panic!("expected Rows, got {other:?}"),
-        }
-    }
-
-    fn error(sql: &str) -> String {
-        execute(&mut Database::new(), sql).unwrap_err().to_string()
-    }
-
+    // Here rather than in slt, which can't check Column names.
     #[test]
-    fn as_names_an_output_column() {
-        let result = query("SELECT 1 AS one, 2");
-        assert_eq!(result.columns, vec!["one", "?column?"]);
-    }
-
-    #[test]
-    fn a_second_statement_is_an_error() {
+    fn as_names_a_result_column() {
+        let Output::Rows(result) = execute(&mut Database::new(), "SELECT 1 AS one, 'a'").unwrap()
+        else {
+            panic!("expected Rows");
+        };
         assert_eq!(
-            error("SELECT 1; SELECT 2;"),
-            "line 1, col 11: expected end of statement"
-        );
-    }
-
-    #[test]
-    fn a_trailing_semicolon_is_optional() {
-        assert_eq!(query("SELECT 1;").rows, query("SELECT 1").rows);
-        assert!(matches!(
-            execute(&mut Database::new(), "SELECT 1;;"),
-            Err(DbError::Syntax { .. })
-        ));
-    }
-
-    #[test]
-    fn errors_at_end_of_input_point_past_the_last_character() {
-        assert_eq!(error("SELECT"), "line 1, col 7: expected an expression");
-        assert_eq!(
-            error("SELECT 1,\n  "),
-            "line 2, col 3: expected an expression"
-        );
-    }
-
-    #[test]
-    fn lexer_errors_surface_as_syntax_errors() {
-        assert_eq!(
-            error("SELECT \"x\""),
-            "line 1, col 8: double-quoted identifiers are not supported"
+            result.columns,
+            vec![
+                ResultColumn::new("one", DataType::Int),
+                // Postgres's name for an unnamed expression.
+                ResultColumn::new("?column?", DataType::Text),
+            ]
         );
     }
 }

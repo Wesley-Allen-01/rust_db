@@ -33,6 +33,18 @@ SELECT 1 + 1 = 2
 ----
 true
 
+# Comparisons don't chain, as in Postgres. Parenthesise to compare a BOOL.
+statement error line 1, col 14: comparison operators cannot be chained
+SELECT 1 < 2 < 3
+
+statement error line 1, col 14: comparison operators cannot be chained
+SELECT 1 = 1 = TRUE
+
+query B
+SELECT (1 = 1) = TRUE
+----
+true
+
 statement error operator = cannot be applied to INT and TEXT
 SELECT 1 = 'a'
 
