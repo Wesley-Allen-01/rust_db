@@ -1,0 +1,40 @@
+# CREATE TABLE errors: Schema errors from the binder, syntax errors from the parser.
+
+# Column names are case-insensitive.
+statement error Duplicate column name: `id`
+CREATE TABLE t (id INT, name TEXT, ID BOOL);
+
+statement error A table must have at least one column
+CREATE TABLE t ();
+
+statement error line 1, col 20: unknown data type `varchar`
+CREATE TABLE t (id VARCHAR);
+
+statement error line 1, col 19: expected a data type
+CREATE TABLE t (id);
+
+statement error line 1, col 27: expected NULL
+CREATE TABLE t (id INT NOT);
+
+# NULL on its own is not a Constraint.
+statement error line 1, col 24: expected , or \)
+CREATE TABLE t (id INT NULL);
+
+statement error line 1, col 23: expected , or \)
+CREATE TABLE t (id INT
+
+statement error line 1, col 16: expected \(
+CREATE TABLE t id INT;
+
+statement error line 1, col 8: expected TABLE
+CREATE t (id INT);
+
+statement error line 1, col 6: expected TABLE
+DROP t;
+
+statement error line 1, col 11: expected a name
+DROP TABLE;
+
+# None of the failed Statements created anything.
+statement error no such table `t`
+DROP TABLE t;
