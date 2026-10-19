@@ -86,7 +86,7 @@ fn compare(op: BinaryOp, left: &Value, right: &Value) -> bool {
 }
 
 /// How two non-NULL Values of one Data Type order. TEXT orders by byte.
-pub fn order(left: &Value, right: &Value) -> Ordering {
+fn order(left: &Value, right: &Value) -> Ordering {
     match (left, right) {
         (Value::Int(a), Value::Int(b)) => a.cmp(b),
         // Floats are always finite (see float_arithmetic), so never NaN.
@@ -94,6 +94,17 @@ pub fn order(left: &Value, right: &Value) -> Ordering {
         (Value::Text(a), Value::Text(b)) => a.cmp(b),
         (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
         _ => unreachable!("binder let through {left:?} against {right:?}"),
+    }
+}
+
+/// Ascending order with NULL after every Value. Reversed for DESC, this puts
+/// NULLs first, as Postgres does.
+pub fn order_nulls_last(a: &Value, b: &Value) -> Ordering {
+    match (a, b) {
+        (Value::Null, Value::Null) => Ordering::Equal,
+        (Value::Null, _) => Ordering::Greater,
+        (_, Value::Null) => Ordering::Less,
+        (a, b) => order(a, b),
     }
 }
 

@@ -11,6 +11,7 @@ use crate::ast::{
 };
 use crate::database::Database;
 use crate::error::{DbError, Result};
+use crate::eval::eval;
 use crate::schema::{Column, ResultColumn, Schema};
 use crate::table::Table;
 use crate::value::{DataType, Value};
@@ -333,7 +334,7 @@ fn bind_count(clause: &'static str, count: Option<Expr>) -> Result<Option<usize>
     if ty != Some(DataType::Int) {
         return Err(DbError::CountNotInt { clause, got: ty });
     }
-    match crate::eval::eval(&count, &[])? {
+    match eval(&count, &[])? {
         Value::Int(n) if n < 0 => Err(DbError::NegativeCount { clause }),
         // An i64 that is not negative always fits a usize on 64-bit targets.
         Value::Int(n) => Ok(Some(usize::try_from(n).unwrap_or(usize::MAX))),
@@ -343,7 +344,7 @@ fn bind_count(clause: &'static str, count: Option<Expr>) -> Result<Option<usize>
 }
 
 /// As in Postgres, a bare INT is a position in the SELECT list, and a bare
-/// name that is an output Column's name sorts by that Column's expression, so
+/// name that is an Result Set Column's name sorts by that Column's expression, so
 /// an alias works as a key. Any other key is an expression over the input
 /// Columns.
 fn bind_sort_key(
@@ -353,8 +354,8 @@ fn bind_sort_key(
     scope: Option<&Schema>,
 ) -> Result<SortKey> {
     let expr = match &item.expr {
-        Expr::Literal(Value::Int(position)) => output_at(*position, exprs)?,
-        Expr::Column(name) => match output_expr(name, exprs, columns)? {
+        Expr::Literal(Value::Int(position)) => select_list_at(*position, exprs)?,
+        Expr::Column(name) => match select_list_expr(name, exprs, columns)? {
             Some(expr) => expr,
             None => bind_expr(item.expr, scope)?.0,
         },
@@ -366,8 +367,8 @@ fn bind_sort_key(
     })
 }
 
-/// The expression of the output Column at `position`, counting from 1.
-fn output_at(position: i64, exprs: &[BoundExpr]) -> Result<BoundExpr> {
+/// The expression of the Result Set Column at `position`, counting from 1.
+fn select_list_at(position: i64, exprs: &[BoundExpr]) -> Result<BoundExpr> {
     usize::try_from(position)
         .ok()
         .and_then(|position| exprs.get(position.checked_sub(1)?))
@@ -375,9 +376,9 @@ fn output_at(position: i64, exprs: &[BoundExpr]) -> Result<BoundExpr> {
         .ok_or(DbError::NoSuchPosition { position })
 }
 
-/// The expression of the output Column called `name`, if there is one.
+/// The expression of the Result Set Column called `name`, if there is one.
 /// Several such Columns are fine only if they compute the same thing.
-fn output_expr(
+fn select_list_expr(
     name: &str,
     exprs: &[BoundExpr],
     columns: &[ResultColumn],

@@ -173,7 +173,6 @@ impl Parser {
 
     fn order_by_item(&mut self) -> Result<OrderByItem> {
         let expr = self.expr()?;
-        // ASC is the default, so it needs no flag of its own.
         let descending = if self.eat_keyword(Keyword::Desc) {
             true
         } else {

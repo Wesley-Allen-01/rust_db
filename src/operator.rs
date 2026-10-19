@@ -3,7 +3,7 @@
 
 use crate::binder::{BoundExpr, SortKey};
 use crate::error::Result;
-use crate::eval::{eval, order};
+use crate::eval::{eval, order_nulls_last};
 use crate::table::{Row, RowId, Table};
 use crate::value::Value;
 use std::cmp::Ordering;
@@ -167,7 +167,7 @@ impl<'a> Sort<'a> {
             .iter()
             .zip(a.iter().zip(b))
             .map(|(key, (a, b))| {
-                let ordering = nulls_last(a, b);
+                let ordering = order_nulls_last(a, b);
                 if key.descending {
                     ordering.reverse()
                 } else {
@@ -176,17 +176,6 @@ impl<'a> Sort<'a> {
             })
             .find(|ordering| ordering.is_ne())
             .unwrap_or(Ordering::Equal)
-    }
-}
-
-/// Ascending order with NULL after every Value. Reversed for DESC, this puts
-/// NULLs first, as Postgres does.
-fn nulls_last(a: &Value, b: &Value) -> Ordering {
-    match (a, b) {
-        (Value::Null, Value::Null) => Ordering::Equal,
-        (Value::Null, _) => Ordering::Greater,
-        (_, Value::Null) => Ordering::Less,
-        (a, b) => order(a, b),
     }
 }
 
@@ -342,7 +331,7 @@ mod tests {
         );
     }
 
-    fn ints(rows: &[PlanRow]) -> Vec<(Option<RowId>, Value)> {
+    fn row_ids_and_first_values(rows: &[PlanRow]) -> Vec<(Option<RowId>, Value)> {
         rows.iter()
             .map(|row| (row.row_id, row.values[0].clone()))
             .collect()
@@ -360,7 +349,7 @@ mod tests {
             row(Some(2), vec![Value::Int(3)]),
         ]);
         assert_eq!(
-            ints(&drain(Sort::new(rows, keys))),
+            row_ids_and_first_values(&drain(Sort::new(rows, keys))),
             vec![
                 (Some(1), Value::Null),
                 (Some(2), Value::Int(3)),
@@ -377,7 +366,7 @@ mod tests {
                 .collect(),
         );
         assert_eq!(
-            ints(&drain(Limit::new(rows, Some(2), 1))),
+            row_ids_and_first_values(&drain(Limit::new(rows, Some(2), 1))),
             vec![(Some(1), Value::Int(1)), (Some(2), Value::Int(2))]
         );
     }

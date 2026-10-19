@@ -18,10 +18,7 @@ pub fn plan_select<'a>(db: &'a Database, select: BoundSelect) -> Result<Box<dyn 
     };
     let rows = with_sort(rows, select.order_by);
     let output = Box::new(Project::new(rows, select.exprs));
-    if select.limit.is_none() && select.offset == 0 {
-        return Ok(output);
-    }
-    Ok(Box::new(Limit::new(output, select.limit, select.offset)))
+    Ok(with_limit(output, select.limit, select.offset))
 }
 
 /// The Rows of `table` for which `predicate` is TRUE (every Row without one),
@@ -48,6 +45,18 @@ fn with_sort<'a>(child: Box<dyn Operator + 'a>, keys: Vec<SortKey>) -> Box<dyn O
         child
     } else {
         Box::new(Sort::new(child, keys))
+    }
+}
+
+fn with_limit<'a>(
+    child: Box<dyn Operator + 'a>,
+    limit: Option<usize>,
+    offset: usize,
+) -> Box<dyn Operator + 'a> {
+    if limit.is_none() && offset == 0 {
+        child
+    } else {
+        Box::new(Limit::new(child, limit, offset))
     }
 }
 
