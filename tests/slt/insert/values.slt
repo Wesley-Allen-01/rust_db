@@ -1,5 +1,4 @@
-# INSERT ... VALUES. Until SELECT ... FROM lands, rows show only through the
-# count each INSERT reports and the errors it gives.
+# INSERT ... VALUES with and without a column list.
 
 statement ok
 CREATE TABLE users (id INT NOT NULL, name TEXT, score FLOAT, active BOOL);
@@ -28,3 +27,11 @@ INSERT INTO users (id, ID) VALUES (4, 5);
 # Each row must give exactly one value per listed Column.
 statement error Expected 2 value\(s\), got 1
 INSERT INTO users (id, name) VALUES (4);
+
+# Only the three INSERTs that succeeded left Rows behind.
+query ITRB
+SELECT * FROM users;
+----
+1 ada 9.5 true
+2 bob NULL NULL
+3 NULL NULL NULL

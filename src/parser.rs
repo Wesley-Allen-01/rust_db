@@ -135,7 +135,21 @@ impl Parser {
         while self.eat(&Token::Comma) {
             items.push(self.select_item()?);
         }
-        Ok(Select { items })
+        let from = if self.eat_keyword(Keyword::From) {
+            Some(self.ident()?)
+        } else {
+            None
+        };
+        let predicate = if self.eat_keyword(Keyword::Where) {
+            Some(self.expr()?)
+        } else {
+            None
+        };
+        Ok(Select {
+            items,
+            from,
+            predicate,
+        })
     }
 
     /// The part of a CREATE TABLE after the `CREATE` keyword.
@@ -243,13 +257,16 @@ impl Parser {
     }
 
     fn select_item(&mut self) -> Result<SelectItem> {
+        if self.eat(&Token::Star) {
+            return Ok(SelectItem::Wildcard);
+        }
         let expr = self.expr()?;
         let alias = if self.eat_keyword(Keyword::As) {
             Some(self.ident()?)
         } else {
             None
         };
-        Ok(SelectItem { expr, alias })
+        Ok(SelectItem::Expr { expr, alias })
     }
 
     fn ident(&mut self) -> Result<String> {

@@ -1,6 +1,5 @@
 //! Evaluates bound expressions with SQL semantics: three-valued logic, NULL
-//! propagation, checked integer arithmetic. Once Column references can be
-//! bound, `eval` will also take the Row they read from.
+//! propagation, checked integer arithmetic.
 //!
 //! The binder has already checked Data Types and inserted every Coercion, so
 //! both operands of a binary operator always hold Values of the same Data Type (or
@@ -11,16 +10,18 @@ use crate::binder::BoundExpr;
 use crate::error::{DbError, Result};
 use crate::value::{DataType, Value};
 
-pub fn eval(expr: &BoundExpr) -> Result<Value> {
+/// Evaluates `expr` against `row`, the Row its Column references read from.
+pub fn eval(expr: &BoundExpr, row: &[Value]) -> Result<Value> {
     match expr {
         BoundExpr::Literal(value) => Ok(value.clone()),
-        BoundExpr::ToFloat(operand) => Ok(eval(operand)?
+        BoundExpr::Column(index) => Ok(row[*index].clone()),
+        BoundExpr::ToFloat(operand) => Ok(eval(operand, row)?
             .coerce_to(DataType::Float)
             .expect("binder only wraps INT or NULL in ToFloat")),
-        BoundExpr::Unary { op, operand } => unary(*op, eval(operand)?),
-        BoundExpr::Binary { op, left, right } => binary(*op, eval(left)?, eval(right)?),
+        BoundExpr::Unary { op, operand } => unary(*op, eval(operand, row)?),
+        BoundExpr::Binary { op, left, right } => binary(*op, eval(left, row)?, eval(right, row)?),
         BoundExpr::IsNull { operand, negated } => {
-            let is_null = eval(operand)?.is_null();
+            let is_null = eval(operand, row)?.is_null();
             Ok(Value::Bool(is_null != *negated))
         }
     }

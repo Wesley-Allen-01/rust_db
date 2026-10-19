@@ -1,0 +1,91 @@
+# WHERE keeps only the Rows for which it is TRUE. FALSE and NULL (unknown)
+# both drop the Row.
+
+statement ok
+CREATE TABLE users (id INT, name TEXT, score FLOAT);
+
+statement ok
+INSERT INTO users VALUES (1, 'ada', 9.5), (2, 'bob', NULL), (3, NULL, 7), (NULL, 'dee', 1);
+
+query IT
+SELECT id, name FROM users WHERE score > 5;
+----
+1 ada
+3 NULL
+
+# INT literals compare with a FLOAT Column through Coercion.
+query I
+SELECT id FROM users WHERE score = 7;
+----
+3
+
+# An INT Column compares with a FLOAT literal through Coercion too.
+query T
+SELECT name FROM users WHERE id = 1.0;
+----
+ada
+
+# Comparing with NULL is unknown, never TRUE, so no Row passes.
+query I
+SELECT id FROM users WHERE name = NULL;
+----
+
+query I
+SELECT id FROM users WHERE name <> NULL;
+----
+
+query I
+SELECT id FROM users WHERE NULL;
+----
+
+query I
+SELECT id FROM users WHERE name IS NULL;
+----
+3
+
+query T
+SELECT name FROM users WHERE id IS NULL;
+----
+dee
+
+# NOT of unknown is still unknown, so bob's Row is dropped both ways.
+query I
+SELECT id FROM users WHERE NOT (score > 5);
+----
+NULL
+
+# OR can be TRUE despite an unknown operand.
+query I
+SELECT id FROM users WHERE score > 5 OR name = 'bob';
+----
+1
+2
+3
+
+query I
+SELECT id FROM users WHERE false;
+----
+
+# WHERE runs before the SELECT list, so a Row it drops is never projected:
+# the id 0 Row would otherwise divide by zero.
+statement ok
+CREATE TABLE divisors (id INT);
+
+statement ok
+INSERT INTO divisors VALUES (5), (0), (2);
+
+query I
+SELECT 10 / id FROM divisors WHERE id <> 0;
+----
+2
+5
+
+# WHERE needs no FROM: it filters the single Row a bare SELECT computes.
+query I
+SELECT 1 WHERE true;
+----
+1
+
+query I
+SELECT 1 WHERE 1 > 2;
+----
