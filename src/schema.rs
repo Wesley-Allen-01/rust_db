@@ -11,7 +11,7 @@ impl Column {
     pub fn new(name: impl Into<String>, data_type: DataType) -> Self {
         Column {
             name: name.into(),
-            data_type: data_type,
+            data_type,
         }
     }
 
