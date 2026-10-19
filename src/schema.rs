@@ -1,6 +1,23 @@
 use crate::error::{DbError, Result};
 use crate::value::{DataType, Value};
 
+/// A Result Set Column: its name and Data Type, known before any Row runs.
+/// Unlike a Table's Column, it carries no Constraints.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResultColumn {
+    pub name: String,
+    pub data_type: DataType,
+}
+
+impl ResultColumn {
+    pub fn new(name: impl Into<String>, data_type: DataType) -> Self {
+        ResultColumn {
+            name: name.into(),
+            data_type,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Column {
     name: String,

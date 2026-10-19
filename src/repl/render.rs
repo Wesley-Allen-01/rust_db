@@ -82,7 +82,7 @@ fn footer(count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execute::ResultColumn;
+    use crate::schema::ResultColumn;
     use crate::value::DataType;
 
     fn result(columns: &[&str], rows: Vec<Vec<Value>>) -> ResultSet {

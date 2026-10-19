@@ -1,8 +1,9 @@
 //! Meta Commands: backslash-prefixed REPL instructions that are not SQL.
 
 use crate::database::Database;
-use crate::execute::{ResultColumn, ResultSet};
+use crate::execute::ResultSet;
 use crate::repl::render::render_table;
+use crate::schema::ResultColumn;
 use crate::value::{DataType, Value};
 
 /// What the REPL should do after a Meta Command.

@@ -7,7 +7,7 @@
 use crate::ast::{BinaryOp, Expr, SelectItem, Statement, UnaryOp};
 use crate::database::Database;
 use crate::error::{DbError, Result};
-use crate::execute::ResultColumn;
+use crate::schema::ResultColumn;
 use crate::value::{DataType, Value};
 
 #[derive(Debug, Clone, PartialEq)]

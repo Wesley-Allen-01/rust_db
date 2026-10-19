@@ -5,7 +5,8 @@ use crate::database::Database;
 use crate::error::Result;
 use crate::parser::parse;
 use crate::planner::plan_select;
-use crate::value::{DataType, Value};
+use crate::schema::ResultColumn;
+use crate::value::Value;
 
 /// What a successful Statement produces.
 #[derive(Debug, Clone)]
@@ -31,22 +32,6 @@ pub struct ResultSet {
     pub rows: Vec<Vec<Value>>,
 }
 
-/// A Result Set Column: its name and Data Type, known before any Row runs.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ResultColumn {
-    pub name: String,
-    pub data_type: DataType,
-}
-
-impl ResultColumn {
-    pub fn new(name: impl Into<String>, data_type: DataType) -> Self {
-        ResultColumn {
-            name: name.into(),
-            data_type,
-        }
-    }
-}
-
 impl ResultSet {
     /// Each Row's Values as display text.
     pub fn text_rows(&self) -> Vec<Vec<String>> {
@@ -61,7 +46,7 @@ impl ResultSet {
 ///
 /// The Statement may end with a `;`. Anything after that first `;` (such as a
 /// second Statement) is an error, not silently ignored; the parser enforces this.
-/// Splitting several Statements typed on one line is the caller's job.
+/// For now that means a REPL line holding several Statements is rejected too.
 pub fn execute(db: &mut Database, sql: &str) -> Result<Output> {
     let statement = parse(sql)?;
     match bind(db, statement)? {
@@ -82,6 +67,7 @@ fn run_select(select: BoundSelect) -> Result<ResultSet> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::DataType;
 
     // Here rather than in slt, which can't check Column names.
     #[test]
