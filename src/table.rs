@@ -40,8 +40,8 @@ impl Index<usize> for Row {
 pub struct Table {
     name: String,
     schema: Schema,
-    rows: BTreeMap<usize, Row>,
-    next_id: usize,
+    rows: BTreeMap<RowId, Row>,
+    next_id: RowId,
 }
 
 impl Table {
@@ -71,14 +71,14 @@ impl Table {
     }
 
     /// Applies Coercion, validates the Row, and returns its new Row ID.
-    pub fn insert(&mut self, values: Vec<Value>) -> Result<usize> {
+    pub fn insert(&mut self, values: Vec<Value>) -> Result<RowId> {
         let values = self.schema.coerce_row(values)?;
         Ok(self.push(values))
     }
 
     /// Inserts every Row or none: all are coerced and validated before any
     /// is added. Returns their Row IDs in order.
-    pub fn insert_all(&mut self, rows: Vec<Vec<Value>>) -> Result<Vec<usize>> {
+    pub fn insert_all(&mut self, rows: Vec<Vec<Value>>) -> Result<Vec<RowId>> {
         let rows = rows
             .into_iter()
             .map(|values| self.schema.coerce_row(values))
@@ -87,7 +87,7 @@ impl Table {
     }
 
     /// Adds a Row that has already been coerced and validated.
-    fn push(&mut self, values: Vec<Value>) -> usize {
+    fn push(&mut self, values: Vec<Value>) -> RowId {
         // IDs only ever increase, so a deleted row's ID is never handed out again.
         let id = self.next_id;
         self.next_id += 1;
@@ -95,7 +95,7 @@ impl Table {
         id
     }
 
-    pub fn update(&mut self, id: usize, values: Vec<Value>) -> Result<bool> {
+    pub fn update(&mut self, id: RowId, values: Vec<Value>) -> Result<bool> {
         let values = self.schema.coerce_row(values)?;
         match self.rows.get_mut(&id) {
             Some(row) => {
@@ -106,11 +106,11 @@ impl Table {
         }
     }
 
-    pub fn delete(&mut self, id: usize) -> bool {
+    pub fn delete(&mut self, id: RowId) -> bool {
         self.rows.remove(&id).is_some()
     }
 
-    pub fn get(&self, id: usize) -> Option<&Row> {
+    pub fn get(&self, id: RowId) -> Option<&Row> {
         self.rows.get(&id)
     }
 

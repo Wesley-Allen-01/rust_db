@@ -19,6 +19,12 @@ SELECT id FROM users WHERE score = 7;
 ----
 3
 
+# An INT Column compares with a FLOAT literal through Coercion too.
+query T
+SELECT name FROM users WHERE id = 1.0;
+----
+ada
+
 # Comparing with NULL is unknown, never TRUE, so no Row passes.
 query I
 SELECT id FROM users WHERE name = NULL;
@@ -59,6 +65,20 @@ SELECT id FROM users WHERE score > 5 OR name = 'bob';
 query I
 SELECT id FROM users WHERE false;
 ----
+
+# WHERE runs before the SELECT list, so a Row it drops is never projected:
+# the id 0 Row would otherwise divide by zero.
+statement ok
+CREATE TABLE divisors (id INT);
+
+statement ok
+INSERT INTO divisors VALUES (5), (0), (2);
+
+query I
+SELECT 10 / id FROM divisors WHERE id <> 0;
+----
+2
+5
 
 # WHERE needs no FROM: it filters the single Row a bare SELECT computes.
 query I

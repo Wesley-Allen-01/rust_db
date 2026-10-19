@@ -126,8 +126,16 @@ impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expr::Literal(Value::Text(s)) => write!(f, "'{}'", s.replace('\'', "''")),
-            // Debug keeps the `.0` that tells `1.0` from `1`.
-            Expr::Literal(Value::Float(x)) => write!(f, "{x:?}"),
+            Expr::Literal(Value::Float(x)) => {
+                // Display never uses an exponent, which the lexer can't read,
+                // but drops the `.0` that tells `1.0` from the INT `1`.
+                let text = x.to_string();
+                if text.contains('.') {
+                    f.write_str(&text)
+                } else {
+                    write!(f, "{text}.0")
+                }
+            }
             Expr::Literal(value) => write!(f, "{value}"),
             Expr::Column(name) => f.write_str(name),
             Expr::Unary {
@@ -189,5 +197,35 @@ impl fmt::Display for BinaryOp {
             BinaryOp::Or => "OR",
             BinaryOp::Concat => "||",
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::parse;
+
+    // The header must be SQL the lexer reads back as the same FLOAT.
+    #[test]
+    fn a_float_literal_prints_as_plain_decimal_that_reads_back() {
+        for (x, text) in [
+            (1e20, "100000000000000000000.0"),
+            (1.5e-7, "0.00000015"),
+            (1.0, "1.0"),
+            (2.5, "2.5"),
+        ] {
+            let literal = Expr::Literal(Value::Float(x));
+            assert_eq!(literal.to_string(), text);
+            let Statement::Select(select) = parse(&format!("SELECT {text}")).unwrap() else {
+                panic!("expected a SELECT");
+            };
+            assert_eq!(
+                select.items,
+                vec![SelectItem::Expr {
+                    expr: literal,
+                    alias: None
+                }]
+            );
+        }
     }
 }
