@@ -1,10 +1,10 @@
 //! The REPL binary: reads lines, runs Meta Commands and Statements, prints results.
 
 use rust_db::database::Database;
-use rust_db::execute::{Output, execute};
+use rust_db::execute::execute;
 use rust_db::repl::input::{Input, InputBuffer};
 use rust_db::repl::meta::{MetaOutcome, run_meta};
-use rust_db::repl::render::render_table;
+use rust_db::repl::render::render_output;
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 
@@ -33,22 +33,25 @@ fn main() -> rustyline::Result<()> {
             Err(ReadlineError::Eof) => break,
             Err(err) => return Err(err),
         };
-        if !line.trim().is_empty() {
-            editor.add_history_entry(line.as_str())?;
-        }
-
+        // History holds whole Meta Commands and Statements, so Up recalls a
+        // multi-line Statement in one piece, like psql.
         match buffer.push(&line) {
             None => {}
-            Some(Input::Meta(command)) => match run_meta(&db, &command) {
-                Ok(MetaOutcome::Quit) => break,
-                Ok(MetaOutcome::Print(text)) => print!("{text}"),
-                Err(message) => eprintln!("ERROR: {message}"),
-            },
-            Some(Input::Statement(sql)) => match execute(&mut db, &sql) {
-                Ok(Output::Done) => println!("OK"),
-                Ok(Output::Rows(result)) => print!("{}", render_table(&result)),
-                Err(err) => eprintln!("ERROR: {err}"),
-            },
+            Some(Input::Meta(command)) => {
+                editor.add_history_entry(command.as_str())?;
+                match run_meta(&db, &command) {
+                    Ok(MetaOutcome::Quit) => break,
+                    Ok(MetaOutcome::Print(text)) => print!("{text}"),
+                    Err(message) => eprintln!("ERROR: {message}"),
+                }
+            }
+            Some(Input::Statement(sql)) => {
+                editor.add_history_entry(sql.as_str())?;
+                match execute(&mut db, &sql) {
+                    Ok(output) => print!("{}", render_output(&output)),
+                    Err(err) => eprintln!("ERROR: {err}"),
+                }
+            }
         }
     }
 

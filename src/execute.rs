@@ -7,8 +7,13 @@ use crate::value::Value;
 /// What a successful Statement produces.
 #[derive(Debug, Clone)]
 pub enum Output {
-    /// The Statement ran and returns no Rows (e.g. CREATE TABLE).
-    Done,
+    /// The Statement ran and returns no Rows (e.g. CREATE TABLE, INSERT).
+    Done {
+        /// psql-style command tag, e.g. "CREATE TABLE", "INSERT 0 2", "UPDATE 3".
+        tag: String,
+        /// Rows inserted, updated or deleted; 0 for Statements that change no Rows.
+        rows_affected: u64,
+    },
     /// The Statement returns Rows (e.g. SELECT).
     Rows(ResultSet),
 }
@@ -33,7 +38,11 @@ impl ResultSet {
     }
 }
 
-/// Runs one SQL Statement against the Database.
+/// Runs exactly one SQL Statement against the Database.
+///
+/// The Statement may end with a `;`. Anything after that first `;` (such as a
+/// second Statement) is an error, not silently ignored; the parser enforces this.
+/// Splitting several Statements typed on one line is the caller's job.
 pub fn execute(_db: &mut Database, _sql: &str) -> Result<Output> {
     // Placeholder until the lexer and parser exist.
     Err(DbError::NotYetSupported)

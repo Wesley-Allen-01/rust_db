@@ -134,7 +134,10 @@ mod tests {
     #[test]
     fn trailing_comment_after_semicolon_still_ends_the_statement() {
         let mut buffer = InputBuffer::new();
-        assert_eq!(buffer.push("SELECT 1; -- one"), statement("SELECT 1; -- one"));
+        assert_eq!(
+            buffer.push("SELECT 1; -- one"),
+            statement("SELECT 1; -- one")
+        );
     }
 
     #[test]

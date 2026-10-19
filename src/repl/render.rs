@@ -1,7 +1,15 @@
-//! psql-style aligned tables for showing a ResultSet.
+//! psql-style text for showing a Statement's Output.
 
-use crate::execute::ResultSet;
+use crate::execute::{Output, ResultSet};
 use crate::value::Value;
+
+/// A Done Statement shows its command tag; a Statement with Rows shows a table.
+pub fn render_output(output: &Output) -> String {
+    match output {
+        Output::Done { tag, .. } => format!("{tag}\n"),
+        Output::Rows(result) => render_table(result),
+    }
+}
 
 /// Renders Rows like psql: centred headers, a dashed rule, then a row-count footer.
 pub fn render_table(result: &ResultSet) -> String {
@@ -140,6 +148,21 @@ mod tests {
     fn renders_empty_result_with_zero_rows_footer() {
         let out = render_table(&result(&["id"], vec![]));
         assert_eq!(out, " id \n----\n(0 rows)\n");
+    }
+
+    #[test]
+    fn done_output_shows_its_command_tag() {
+        let done = Output::Done {
+            tag: "INSERT 0 2".to_string(),
+            rows_affected: 2,
+        };
+        assert_eq!(render_output(&done), "INSERT 0 2\n");
+    }
+
+    #[test]
+    fn rows_output_shows_a_table() {
+        let rows = Output::Rows(result(&["id"], vec![vec![Value::Int(1)]]));
+        assert_eq!(render_output(&rows), " id \n----\n  1\n(1 row)\n");
     }
 
     #[test]

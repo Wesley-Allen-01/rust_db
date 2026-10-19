@@ -17,7 +17,7 @@ impl sqllogictest::DB for Engine {
 
     fn run(&mut self, sql: &str) -> Result<DBOutput<DefaultColumnType>, DbError> {
         match execute(&mut self.db, sql)? {
-            Output::Done => Ok(DBOutput::StatementComplete(0)),
+            Output::Done { rows_affected, .. } => Ok(DBOutput::StatementComplete(rows_affected)),
             Output::Rows(result) => Ok(DBOutput::Rows {
                 // Column types are not checked yet, so report every column as Any.
                 types: vec![DefaultColumnType::Any; result.columns.len()],
