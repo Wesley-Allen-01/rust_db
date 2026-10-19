@@ -102,7 +102,7 @@ fn bind_expr(expr: Expr) -> Result<(BoundExpr, ExprType)> {
 fn bind_unary(op: UnaryOp, operand: Expr) -> Result<(BoundExpr, ExprType)> {
     let (operand, ty) = bind_expr(operand)?;
     let result_ty = match op {
-        UnaryOp::Neg if is_numeric(ty) => ty,
+        UnaryOp::Neg if is_numeric(ty) => numeric_result(ty),
         UnaryOp::Not if fits(ty, DataType::Bool) => Some(DataType::Bool),
         _ => return Err(DbError::UnaryTypeMismatch { op, operand: ty }),
     };
@@ -129,7 +129,8 @@ fn bind_binary(op: BinaryOp, left: Expr, right: Expr) -> Result<(BoundExpr, Expr
         BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod
             if is_numeric(left_ty) && is_numeric(right_ty) =>
         {
-            unify((left, left_ty), (right, right_ty)).ok_or(mismatch)?
+            let (left, right, ty) = unify((left, left_ty), (right, right_ty)).ok_or(mismatch)?;
+            (left, right, numeric_result(ty))
         }
         op if op.is_comparison() => {
             let (left, right, _) = unify((left, left_ty), (right, right_ty)).ok_or(mismatch)?;
@@ -169,6 +170,12 @@ fn to_float(expr: BoundExpr) -> BoundExpr {
 /// NULL can stand anywhere.
 fn fits(ty: ExprType, expected: DataType) -> bool {
     ty.is_none_or(|t| t == expected)
+}
+
+/// Arithmetic on only NULLs is INT, so its result can't then pass as BOOL or
+/// TEXT (ADR-0003).
+fn numeric_result(ty: ExprType) -> ExprType {
+    ty.or(Some(DataType::Int))
 }
 
 fn is_numeric(ty: ExprType) -> bool {

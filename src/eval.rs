@@ -74,8 +74,8 @@ fn or(left: Option<bool>, right: Option<bool>) -> Value {
 fn compare(op: BinaryOp, left: &Value, right: &Value) -> bool {
     let ordering = match (left, right) {
         (Value::Int(a), Value::Int(b)) => a.cmp(b),
-        // total_cmp only as a fallback, for NaN; it would put -0.0 below 0.0.
-        (Value::Float(a), Value::Float(b)) => a.partial_cmp(b).unwrap_or(a.total_cmp(b)),
+        // Floats are always finite (see float_arithmetic), so never NaN.
+        (Value::Float(a), Value::Float(b)) => a.partial_cmp(b).expect("FLOAT is never NaN"),
         (Value::Text(a), Value::Text(b)) => a.cmp(b),
         (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
         _ => unreachable!("binder let through {left:?} {op} {right:?}"),
@@ -127,12 +127,19 @@ fn float_arithmetic(op: BinaryOp, a: f64, b: f64) -> Result<f64> {
     if matches!(op, BinaryOp::Div | BinaryOp::Mod) && b == 0.0 {
         return Err(DbError::DivisionByZero);
     }
-    Ok(match op {
+    let result = match op {
         BinaryOp::Add => a + b,
         BinaryOp::Sub => a - b,
         BinaryOp::Mul => a * b,
         BinaryOp::Div => a / b,
         BinaryOp::Mod => a % b,
         _ => unreachable!("{op} is not arithmetic"),
-    })
+    };
+    // Literals are finite and every operation is checked, so inf and NaN
+    // never reach a Value.
+    if result.is_finite() {
+        Ok(result)
+    } else {
+        Err(DbError::FloatOverflow)
+    }
 }

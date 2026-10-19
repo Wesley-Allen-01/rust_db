@@ -55,6 +55,8 @@ pub enum DbError {
 
     IntegerOverflow,
 
+    FloatOverflow,
+
     DivisionByZero,
 
     NotYetSupported,
@@ -119,6 +121,8 @@ impl fmt::Display for DbError {
             }
 
             DbError::IntegerOverflow => write!(f, "integer out of range"),
+
+            DbError::FloatOverflow => write!(f, "float out of range"),
 
             DbError::DivisionByZero => write!(f, "division by zero"),
 
