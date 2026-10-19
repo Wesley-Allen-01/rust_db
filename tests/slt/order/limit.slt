@@ -64,6 +64,14 @@ query I
 SELECT id FROM t ORDER BY id LIMIT 2 OFFSET 100;
 ----
 
+# Rows past the limit are never projected, so id 3's division by zero
+# never runs.
+query I
+SELECT 1 / (id - 3) FROM t ORDER BY id LIMIT 2;
+----
+0
+-1
+
 # LIMIT applies after WHERE.
 query I
 SELECT id FROM t WHERE id > 2 ORDER BY id LIMIT 2;

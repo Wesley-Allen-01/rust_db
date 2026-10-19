@@ -344,7 +344,7 @@ fn bind_count(clause: &'static str, count: Option<Expr>) -> Result<Option<usize>
 }
 
 /// As in Postgres, a bare INT is a position in the SELECT list, and a bare
-/// name that is an Result Set Column's name sorts by that Column's expression, so
+/// name that is a Result Set Column's name sorts by that Column's expression, so
 /// an alias works as a key. Any other key is an expression over the input
 /// Columns.
 fn bind_sort_key(
