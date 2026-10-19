@@ -3,7 +3,7 @@
 //! Statements are parsed by recursive descent, expressions by precedence
 //! climbing (Pratt parsing). Hand-written per ADR-0001.
 
-use crate::ast::{Expr, Select, SelectItem, Statement};
+use crate::ast::{BinaryOp, Expr, Select, SelectItem, Statement, UnaryOp};
 use crate::error::{DbError, Result};
 use crate::lexer::{Keyword, Position, PositionedToken, Token, tokenize};
 use crate::value::Value;
@@ -43,6 +43,58 @@ fn end_of(sql: &str) -> Position {
         }
     }
     pos
+}
+
+/// How tightly each operator binds, loosest first. Follows Postgres's precedence.
+mod power {
+    use crate::ast::BinaryOp;
+
+    pub const OR: u8 = 1;
+    pub const AND: u8 = 2;
+    pub const NOT: u8 = 3;
+    pub const IS: u8 = 4;
+    pub const COMPARE: u8 = 5;
+    pub const CONCAT: u8 = 6;
+    pub const ADD: u8 = 7;
+    pub const MUL: u8 = 8;
+    pub const NEG: u8 = 9;
+
+    pub fn of(op: BinaryOp) -> u8 {
+        match op {
+            BinaryOp::Or => OR,
+            BinaryOp::And => AND,
+            BinaryOp::Eq
+            | BinaryOp::NotEq
+            | BinaryOp::Lt
+            | BinaryOp::LtEq
+            | BinaryOp::Gt
+            | BinaryOp::GtEq => COMPARE,
+            BinaryOp::Concat => CONCAT,
+            BinaryOp::Add | BinaryOp::Sub => ADD,
+            BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => MUL,
+        }
+    }
+}
+
+fn binary_op(token: &Token) -> Option<BinaryOp> {
+    let op = match token {
+        Token::Plus => BinaryOp::Add,
+        Token::Minus => BinaryOp::Sub,
+        Token::Star => BinaryOp::Mul,
+        Token::Slash => BinaryOp::Div,
+        Token::Percent => BinaryOp::Mod,
+        Token::Eq => BinaryOp::Eq,
+        Token::NotEq => BinaryOp::NotEq,
+        Token::Lt => BinaryOp::Lt,
+        Token::LtEq => BinaryOp::LtEq,
+        Token::Gt => BinaryOp::Gt,
+        Token::GtEq => BinaryOp::GtEq,
+        Token::Concat => BinaryOp::Concat,
+        Token::Keyword(Keyword::And) => BinaryOp::And,
+        Token::Keyword(Keyword::Or) => BinaryOp::Or,
+        _ => return None,
+    };
+    Some(op)
 }
 
 struct Parser {
@@ -100,11 +152,78 @@ impl Parser {
     }
 
     fn expr(&mut self) -> Result<Expr> {
-        self.primary()
+        self.expr_binding(0)
+    }
+
+    /// Parses an expression whose operators all bind at least as tightly as
+    /// `min_power`. A looser operator ends it and is left for the caller.
+    fn expr_binding(&mut self, min_power: u8) -> Result<Expr> {
+        let mut left = self.prefix()?;
+        loop {
+            if self.peek() == Some(&Token::Keyword(Keyword::Is)) {
+                if power::IS < min_power {
+                    break;
+                }
+                left = self.is_null(left)?;
+                continue;
+            }
+            let Some(op) = self.peek().and_then(binary_op) else {
+                break;
+            };
+            let power = power::of(op);
+            if power < min_power {
+                break;
+            }
+            self.i += 1;
+            // `+ 1` makes operators of equal power left-associative.
+            let right = self.expr_binding(power + 1)?;
+            left = Expr::Binary {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    /// `IS [NOT] NULL`, applied to the expression before it.
+    fn is_null(&mut self, operand: Expr) -> Result<Expr> {
+        self.i += 1; // IS
+        let negated = self.eat_keyword(Keyword::Not);
+        if !self.eat_keyword(Keyword::Null) {
+            return Err(self.error("expected NULL"));
+        }
+        Ok(Expr::IsNull {
+            operand: Box::new(operand),
+            negated,
+        })
+    }
+
+    /// A unary operator applied to what follows, or a primary expression.
+    fn prefix(&mut self) -> Result<Expr> {
+        let (op, power) = if self.eat(&Token::Minus) {
+            (UnaryOp::Neg, power::NEG)
+        } else if self.eat_keyword(Keyword::Not) {
+            (UnaryOp::Not, power::NOT)
+        } else {
+            return self.primary();
+        };
+        let operand = self.expr_binding(power)?;
+        Ok(Expr::Unary {
+            op,
+            operand: Box::new(operand),
+        })
     }
 
     /// A literal, a Column name, or a parenthesised expression.
     fn primary(&mut self) -> Result<Expr> {
+        if self.eat(&Token::LParen) {
+            let expr = self.expr()?;
+            if !self.eat(&Token::RParen) {
+                return Err(self.error("expected )"));
+            }
+            return Ok(expr);
+        }
         let expr = match self.peek() {
             Some(Token::Integer(i)) => Expr::Literal(Value::Int(*i)),
             Some(Token::Float(x)) => Expr::Literal(Value::Float(*x)),

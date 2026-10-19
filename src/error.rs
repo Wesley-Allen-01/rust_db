@@ -1,3 +1,4 @@
+use crate::ast::{BinaryOp, UnaryOp};
 use crate::lexer::Position;
 use crate::value::DataType;
 use std::fmt;
@@ -39,7 +40,32 @@ pub enum DbError {
         message: String,
     },
 
+    /// A binary operator was given operands of Data Types it doesn't accept.
+    /// `None` is an operand that is only known to be NULL.
+    BinaryTypeMismatch {
+        op: BinaryOp,
+        left: Option<DataType>,
+        right: Option<DataType>,
+    },
+
+    UnaryTypeMismatch {
+        op: UnaryOp,
+        operand: Option<DataType>,
+    },
+
+    IntegerOverflow,
+
+    DivisionByZero,
+
     NotYetSupported,
+}
+
+/// A Data Type for an error message, where `None` means NULL.
+fn type_name(data_type: &Option<DataType>) -> String {
+    match data_type {
+        Some(t) => t.to_string(),
+        None => "NULL".to_string(),
+    }
 }
 
 impl fmt::Display for DbError {
@@ -62,10 +88,7 @@ impl fmt::Display for DbError {
                 expected,
                 got,
             } => {
-                let got = match got {
-                    Some(t) => t.to_string(),
-                    None => "NULL".to_string(),
-                };
+                let got = type_name(got);
                 write!(f, "column `{column}` expects {expected}, got {got}")
             }
 
@@ -84,6 +107,20 @@ impl fmt::Display for DbError {
             DbError::Syntax { pos, message } => {
                 write!(f, "line {}, col {}: {message}", pos.line, pos.col)
             }
+
+            DbError::BinaryTypeMismatch { op, left, right } => {
+                let (left, right) = (type_name(left), type_name(right));
+                write!(f, "operator {op} cannot be applied to {left} and {right}")
+            }
+
+            DbError::UnaryTypeMismatch { op, operand } => {
+                let operand = type_name(operand);
+                write!(f, "operator {op} cannot be applied to {operand}")
+            }
+
+            DbError::IntegerOverflow => write!(f, "integer out of range"),
+
+            DbError::DivisionByZero => write!(f, "division by zero"),
 
             DbError::NotYetSupported => {
                 write!(f, "not yet supported")
