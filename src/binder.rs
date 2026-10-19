@@ -292,12 +292,12 @@ fn unify(
     (left, left_ty): (BoundExpr, ExprType),
     (right, right_ty): (BoundExpr, ExprType),
 ) -> Option<(BoundExpr, BoundExpr, ExprType)> {
-    use DataType::{Float, Int};
     match (left_ty, right_ty) {
-        (Some(Int), Some(Float)) => Some((to_float(left), right, Some(Float))),
-        (Some(Float), Some(Int)) => Some((left, to_float(right), Some(Float))),
+        (Some(l), Some(r)) if l == r => Some((left, right, left_ty)),
+        (Some(l), Some(r)) if l.coerces_to(r) => Some((to_float(left), right, right_ty)),
+        (Some(l), Some(r)) if r.coerces_to(l) => Some((left, to_float(right), left_ty)),
+        (Some(_), Some(_)) => None,
         // NULL takes on the other operand's Data Type.
-        (Some(l), Some(r)) if l != r => None,
         _ => Some((left, right, left_ty.or(right_ty))),
     }
 }

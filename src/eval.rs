@@ -9,15 +9,14 @@
 use crate::ast::{BinaryOp, UnaryOp};
 use crate::binder::BoundExpr;
 use crate::error::{DbError, Result};
-use crate::value::Value;
+use crate::value::{DataType, Value};
 
 pub fn eval(expr: &BoundExpr) -> Result<Value> {
     match expr {
         BoundExpr::Literal(value) => Ok(value.clone()),
-        BoundExpr::ToFloat(operand) => Ok(match eval(operand)? {
-            Value::Int(i) => Value::Float(i as f64),
-            other => other,
-        }),
+        BoundExpr::ToFloat(operand) => Ok(eval(operand)?
+            .coerce_to(DataType::Float)
+            .expect("binder only wraps INT or NULL in ToFloat")),
         BoundExpr::Unary { op, operand } => unary(*op, eval(operand)?),
         BoundExpr::Binary { op, left, right } => binary(*op, eval(left)?, eval(right)?),
         BoundExpr::IsNull { operand, negated } => {

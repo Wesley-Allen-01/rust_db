@@ -52,13 +52,6 @@ impl Value {
         matches!(self, Value::Null)
     }
 
-    pub fn fits(&self, expected: DataType) -> bool {
-        match self.type_of() {
-            None => true,
-            Some(actual) => actual == expected,
-        }
-    }
-
     /// This Value as `target`, applying Coercion (INT to FLOAT) if needed.
     /// NULL becomes any Data Type. `None` if the Value can't become `target`.
     pub fn coerce_to(self, target: DataType) -> Option<Value> {
@@ -151,19 +144,6 @@ mod tests {
         assert_eq!(Value::Int(1).type_of(), Some(DataType::Int));
         assert_eq!(Value::Float(2.5).type_of(), Some(DataType::Float));
         assert_eq!(Value::Null.type_of(), None);
-    }
-
-    #[test]
-    fn null_fits_any_column() {
-        assert!(Value::Null.fits(DataType::Int));
-        assert!(Value::Null.fits(DataType::Text));
-    }
-
-    #[test]
-    fn type_mismatch_is_rejected() {
-        assert!(Value::Int(1).fits(DataType::Int));
-        assert!(!Value::Int(2).fits(DataType::Text));
-        assert!(!Value::Float(3.2).fits(DataType::Int));
     }
 
     // Rust equality is structural, for tests and lookups. SQL comparison
