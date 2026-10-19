@@ -78,6 +78,17 @@ pub enum DbError {
     AmbiguousColumn {
         name: String,
     },
+
+    /// A LIMIT or OFFSET count whose Data Type isn't INT. `None` is NULL.
+    CountNotInt {
+        clause: &'static str,
+        got: Option<DataType>,
+    },
+
+    /// A LIMIT or OFFSET count below zero.
+    NegativeCount {
+        clause: &'static str,
+    },
 }
 
 /// A Data Type for an error message, where `None` means NULL.
@@ -162,6 +173,15 @@ impl fmt::Display for DbError {
 
             DbError::AmbiguousColumn { name } => {
                 write!(f, "column name `{name}` is ambiguous")
+            }
+
+            DbError::CountNotInt { clause, got } => {
+                let got = type_name(got);
+                write!(f, "{clause} must be INT, got {got}")
+            }
+
+            DbError::NegativeCount { clause } => {
+                write!(f, "{clause} must not be negative")
             }
         }
     }

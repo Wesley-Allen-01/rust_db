@@ -3,11 +3,12 @@
 use crate::binder::{BoundExpr, BoundSelect, SortKey};
 use crate::database::Database;
 use crate::error::Result;
-use crate::operator::{Filter, Operator, Project, Scan, SingleRow, Sort};
+use crate::operator::{Filter, Limit, Operator, Project, Scan, SingleRow, Sort};
 use crate::table::Table;
 
-/// Builds `Project(Sort?(Filter?(Scan | SingleRow)))`. Sort goes below the
-/// Project because its keys read input Rows, not the SELECT list's output.
+/// Builds `Limit?(Project(Sort?(Filter?(Scan | SingleRow))))`. Sort goes
+/// below the Project because its keys read input Rows, not the SELECT list's
+/// output. Limit goes above it, so Rows past the limit are never projected.
 pub fn plan_select<'a>(db: &'a Database, select: BoundSelect) -> Result<Box<dyn Operator + 'a>> {
     let rows = match &select.from {
         // The binder has checked the name; `get` checks it again as a guard.
@@ -16,7 +17,11 @@ pub fn plan_select<'a>(db: &'a Database, select: BoundSelect) -> Result<Box<dyn 
         None => with_filter(Box::new(SingleRow::new()), select.predicate),
     };
     let rows = with_sort(rows, select.order_by);
-    Ok(Box::new(Project::new(rows, select.exprs)))
+    let output = Box::new(Project::new(rows, select.exprs));
+    if select.limit.is_none() && select.offset == 0 {
+        return Ok(output);
+    }
+    Ok(Box::new(Limit::new(output, select.limit, select.offset)))
 }
 
 /// The Rows of `table` for which `predicate` is TRUE (every Row without one),

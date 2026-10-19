@@ -68,6 +68,10 @@ pub struct BoundSelect {
     /// The ORDER BY keys, most significant first. Each reads the same Rows
     /// as the SELECT list, not its output.
     pub order_by: Vec<SortKey>,
+    /// The most Rows to return, if there is a LIMIT.
+    pub limit: Option<usize>,
+    /// How many Rows to skip first: 0 without OFFSET.
+    pub offset: usize,
 }
 
 /// One ORDER BY key. NULLs sort last for ASC and first for DESC, as in Postgres.
@@ -313,7 +317,29 @@ fn bind_select(db: &Database, select: Select) -> Result<BoundStatement> {
         exprs,
         columns,
         order_by,
+        limit: bind_count("LIMIT", select.limit)?,
+        offset: bind_count("OFFSET", select.offset)?.unwrap_or(0),
     }))
+}
+
+/// Binds the count of a LIMIT or OFFSET `clause`: a constant INT that is not
+/// negative. Being constant, it is evaluated here, once.
+fn bind_count(clause: &'static str, count: Option<Expr>) -> Result<Option<usize>> {
+    let Some(count) = count else {
+        return Ok(None);
+    };
+    // No scope: a constant can't read a Column.
+    let (count, ty) = bind_expr(count, None)?;
+    if ty != Some(DataType::Int) {
+        return Err(DbError::CountNotInt { clause, got: ty });
+    }
+    match crate::eval::eval(&count, &[])? {
+        Value::Int(n) if n < 0 => Err(DbError::NegativeCount { clause }),
+        // An i64 that is not negative always fits a usize on 64-bit targets.
+        Value::Int(n) => Ok(Some(usize::try_from(n).unwrap_or(usize::MAX))),
+        // An INT expression such as `NULL + 1` can still evaluate to NULL.
+        _ => Err(DbError::CountNotInt { clause, got: None }),
+    }
 }
 
 /// A bare name that is an output Column's name sorts by that Column's
