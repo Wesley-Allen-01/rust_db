@@ -13,3 +13,90 @@ SELECT id, name FROM people ORDER BY name;
 2 ada
 3 bob
 1 carol
+
+query IT
+SELECT id, name FROM people ORDER BY name DESC;
+----
+1 carol
+3 bob
+2 ada
+
+# Later keys break ties in earlier ones, each in its own direction.
+query IR
+SELECT id, score FROM people ORDER BY score DESC, id ASC;
+----
+2 9
+1 7.5
+3 7.5
+
+query IR
+SELECT id, score FROM people ORDER BY score, id DESC;
+----
+3 7.5
+1 7.5
+2 9
+
+# Rows that tie on every key keep their input order.
+query I
+SELECT id FROM people ORDER BY score;
+----
+1
+3
+2
+
+# A key can be any expression over the input Columns, even one not selected.
+query T
+SELECT name FROM people ORDER BY id * -1;
+----
+bob
+ada
+carol
+
+# A key can name an output alias...
+query IR
+SELECT id, score * 2 AS doubled FROM people ORDER BY doubled DESC, id;
+----
+2 18
+1 15
+3 15
+
+# An alias wins over an input Column of the same name, as in Postgres.
+query TI
+SELECT name AS id, id AS name FROM people ORDER BY id;
+----
+ada 2
+bob 3
+carol 1
+
+# Two output Columns of one name are fine if they compute the same thing...
+query II
+SELECT id, id FROM people ORDER BY id DESC;
+----
+3 3
+2 2
+1 1
+
+# ...and ambiguous if they don't.
+statement error column name `x` is ambiguous
+SELECT id AS x, name AS x FROM people ORDER BY x;
+
+# Keys are bound like any expression.
+statement error no such column `nope`
+SELECT id FROM people ORDER BY nope;
+
+statement error operator \+ cannot be applied to TEXT and INT
+SELECT id FROM people ORDER BY name + 1;
+
+# An alias is only a key on its own, not inside an expression, as in Postgres.
+statement error no such column `doubled`
+SELECT score * 2 AS doubled FROM people ORDER BY doubled + 1;
+
+# A runtime error in a key fails the whole SELECT.
+statement error division by zero
+SELECT id FROM people ORDER BY id / 0;
+
+# Without FROM there is one Row to sort.
+query I
+SELECT 1 + 1 AS two ORDER BY two;
+----
+2

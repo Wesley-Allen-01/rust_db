@@ -1,0 +1,83 @@
+# How ORDER BY orders each Data Type, and where it puts NULL.
+
+statement ok
+CREATE TABLE t (id INT, x FLOAT, s TEXT, b BOOL);
+
+# INT Values go into the FLOAT Column by Coercion and sort numerically
+# among the FLOATs.
+statement ok
+INSERT INTO t VALUES (1, 2.5, 'b', true), (2, NULL, 'B', NULL), (3, -1, 'a', false), (4, 10, NULL, true), (5, 2, '', NULL);
+
+# NULLs come last for ASC...
+query IR
+SELECT id, x FROM t ORDER BY x;
+----
+3 -1
+5 2
+1 2.5
+4 10
+2 NULL
+
+# ...and first for DESC, as in Postgres.
+query IR
+SELECT id, x FROM t ORDER BY x DESC;
+----
+2 NULL
+4 10
+1 2.5
+5 2
+3 -1
+
+# TEXT sorts by byte: the empty string first, upper case before lower.
+query IT
+SELECT id, s FROM t ORDER BY s;
+----
+5 (empty)
+2 B
+3 a
+1 b
+4 NULL
+
+query IT
+SELECT id, s FROM t ORDER BY s DESC;
+----
+4 NULL
+1 b
+3 a
+2 B
+5 (empty)
+
+# FALSE sorts before TRUE, then NULL. The second key breaks ties.
+query IB
+SELECT id, b FROM t ORDER BY b, id DESC;
+----
+3 false
+4 true
+1 true
+5 NULL
+2 NULL
+
+# A key that is NULL for every Row leaves the input order alone.
+query I
+SELECT id FROM t ORDER BY NULL;
+----
+1
+2
+3
+4
+5
+
+# An INT key sorts numerically, not as text.
+statement ok
+CREATE TABLE n (v INT);
+
+statement ok
+INSERT INTO n VALUES (10), (-3), (2), (100);
+
+query I
+SELECT v FROM n ORDER BY v;
+----
+-3
+2
+10
+100
