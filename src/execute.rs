@@ -120,6 +120,44 @@ mod tests {
         assert_eq!(tag(&mut db, "DROP TABLE t"), "DROP TABLE");
     }
 
+    #[test]
+    fn insert_reports_a_psql_status_tag_and_row_count() {
+        let mut db = Database::new();
+        execute(&mut db, "CREATE TABLE t (id INT)").unwrap();
+        let output = execute(&mut db, "INSERT INTO t VALUES (1), (2)").unwrap();
+        let Output::Done { tag, rows_affected } = output else {
+            panic!("expected Done");
+        };
+        assert_eq!(tag, "INSERT 0 2");
+        assert_eq!(rows_affected, 2);
+    }
+
+    // Checked through Table until SELECT ... FROM can show the Rows.
+    #[test]
+    fn a_failing_last_row_leaves_the_table_empty() {
+        let mut db = Database::new();
+        execute(&mut db, "CREATE TABLE t (id INT NOT NULL)").unwrap();
+        for sql in [
+            "INSERT INTO t VALUES (1), (2), (NULL)",
+            "INSERT INTO t VALUES (1), (2), (1 / 0)",
+        ] {
+            assert!(execute(&mut db, sql).is_err(), "{sql}");
+            assert_eq!(db.get("t").unwrap().len(), 0, "{sql}");
+        }
+    }
+
+    #[test]
+    fn insert_stores_rows_in_schema_order_with_coercion() {
+        let mut db = Database::new();
+        execute(&mut db, "CREATE TABLE t (id INT, name TEXT, score FLOAT)").unwrap();
+        execute(&mut db, "INSERT INTO t (score, id) VALUES (3, 1)").unwrap();
+        let rows: Vec<&[Value]> = db.get("t").unwrap().iter().map(|r| r.values()).collect();
+        assert_eq!(
+            rows,
+            vec![&[Value::Int(1), Value::Null, Value::Float(3.0)][..]]
+        );
+    }
+
     // Here rather than in slt, which can't check Column names.
     #[test]
     fn as_names_a_result_column() {

@@ -176,7 +176,10 @@ mod tests {
 
     #[test]
     fn coercion_turns_an_int_into_a_float() {
-        assert_eq!(Value::Int(3).coerce_to(DataType::Float), Some(Value::Float(3.0)));
+        assert_eq!(
+            Value::Int(3).coerce_to(DataType::Float),
+            Some(Value::Float(3.0))
+        );
     }
 
     #[test]

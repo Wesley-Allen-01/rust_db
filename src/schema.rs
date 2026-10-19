@@ -293,12 +293,7 @@ mod tests {
 
     #[test]
     fn coerce_row_still_rejects_other_mismatches() {
-        let row = vec![
-            Value::Float(1.0),
-            Value::Null,
-            Value::Null,
-            Value::Null,
-        ];
+        let row = vec![Value::Float(1.0), Value::Null, Value::Null, Value::Null];
         assert_eq!(
             users().coerce_row(row).unwrap_err(),
             DbError::TypeMismatch {
