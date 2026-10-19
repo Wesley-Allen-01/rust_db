@@ -14,11 +14,11 @@ pub fn render_output(output: &Output) -> String {
 /// Renders Rows like psql: centred headers, a dashed rule, then a row-count footer.
 pub fn render_table(result: &ResultSet) -> String {
     let text_rows = result.text_rows();
-    let widths = column_widths(&result.columns, &text_rows);
+    let names: Vec<&str> = result.columns.iter().map(|c| c.name.as_str()).collect();
+    let widths = column_widths(&names, &text_rows);
 
     let mut out = String::new();
-    let header: Vec<String> = result
-        .columns
+    let header: Vec<String> = names
         .iter()
         .zip(&widths)
         .map(|(name, &width)| centre(name, width))
@@ -53,7 +53,7 @@ fn pad(value: &Value, text: &str, width: usize) -> String {
     }
 }
 
-fn column_widths(columns: &[String], text_rows: &[Vec<String>]) -> Vec<usize> {
+fn column_widths(columns: &[&str], text_rows: &[Vec<String>]) -> Vec<usize> {
     columns
         .iter()
         .enumerate()
@@ -82,10 +82,16 @@ fn footer(count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::ResultColumn;
+    use crate::value::DataType;
 
     fn result(columns: &[&str], rows: Vec<Vec<Value>>) -> ResultSet {
         ResultSet {
-            columns: columns.iter().map(|c| c.to_string()).collect(),
+            // Rendering goes by each Value, not the Column's Data Type.
+            columns: columns
+                .iter()
+                .map(|name| ResultColumn::new(*name, DataType::Text))
+                .collect(),
             rows,
         }
     }

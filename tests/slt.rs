@@ -3,9 +3,36 @@
 use rust_db::database::Database;
 use rust_db::error::DbError;
 use rust_db::execute::{Output, execute};
-use sqllogictest::{DBOutput, DefaultColumnType, Runner};
+use rust_db::value::DataType;
+use sqllogictest::{ColumnType, DBOutput, Runner, strict_column_validator};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+/// A `query` header's column type letters: one per Data Type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SltType(DataType);
+
+impl ColumnType for SltType {
+    fn from_char(letter: char) -> Option<Self> {
+        let data_type = match letter {
+            'I' => DataType::Int,
+            'R' => DataType::Float,
+            'T' => DataType::Text,
+            'B' => DataType::Bool,
+            _ => return None,
+        };
+        Some(SltType(data_type))
+    }
+
+    fn to_char(&self) -> char {
+        match self.0 {
+            DataType::Int => 'I',
+            DataType::Float => 'R',
+            DataType::Text => 'T',
+            DataType::Bool => 'B',
+        }
+    }
+}
 
 struct Engine {
     db: Database,
@@ -13,14 +40,17 @@ struct Engine {
 
 impl sqllogictest::DB for Engine {
     type Error = DbError;
-    type ColumnType = DefaultColumnType;
+    type ColumnType = SltType;
 
-    fn run(&mut self, sql: &str) -> Result<DBOutput<DefaultColumnType>, DbError> {
+    fn run(&mut self, sql: &str) -> Result<DBOutput<SltType>, DbError> {
         match execute(&mut self.db, sql)? {
             Output::Done { rows_affected, .. } => Ok(DBOutput::StatementComplete(rows_affected)),
             Output::Rows(result) => Ok(DBOutput::Rows {
-                // Column types are not checked yet, so report every column as Any.
-                types: vec![DefaultColumnType::Any; result.columns.len()],
+                types: result
+                    .columns
+                    .iter()
+                    .map(|c| SltType(c.data_type))
+                    .collect(),
                 rows: result
                     .text_rows()
                     .into_iter()
@@ -66,6 +96,8 @@ fn slt_files_pass() {
                 db: Database::new(),
             })
         });
+        // A `query` header's type letters must match the Result Set's Data Types.
+        runner.with_column_validator(strict_column_validator);
         if let Err(err) = runner.run_file(&file) {
             panic!("{}: {err}", file.display());
         }

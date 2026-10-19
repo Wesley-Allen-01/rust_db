@@ -55,7 +55,7 @@ One complete SQL command, such as a SELECT or an INSERT. A Statement either take
 _Avoid_: command, query (when not a SELECT)
 
 **Result Set**:
-The Columns and Rows a Statement such as a SELECT returns. Its Rows need not belong to any Table.
+The Columns and Rows a Statement such as a SELECT returns. Each Column has a name and a Data Type, known before any Row is produced. A Column that can only ever hold NULL is TEXT. Its Rows need not belong to any Table.
 _Avoid_: result, output, rowset
 
 **Plan**:

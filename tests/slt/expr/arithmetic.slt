@@ -1,0 +1,124 @@
+# Arithmetic: + - * / %, unary minus, precedence, Coercion, overflow.
+
+# * binds tighter than +.
+query I
+SELECT 1 + 2 * 3
+----
+7
+
+query I
+SELECT (1 + 2) * 3
+----
+9
+
+# Left-associative: (10 - 4) - 3, (100 / 10) / 5.
+query II
+SELECT 10 - 4 - 3, 100 / 10 / 5
+----
+3 2
+
+query I
+SELECT 2 * 3 % 4
+----
+2
+
+# Unary minus binds tighter than *.
+query III
+SELECT -2 * 3, -(2 + 3), - -4
+----
+-6 -5 4
+
+# INT / INT divides as integers, truncating toward zero like Postgres.
+query IIII
+SELECT 7 / 2, -7 / 2, 7 % 3, -7 % 3
+----
+3 -3 1 -1
+
+# INT mixed with FLOAT gives FLOAT.
+query RRRR
+SELECT 7 / 2.0, 1 + 0.5, 2.5 * 2, 1.5 - 1
+----
+3.5 1.5 5 0.5
+
+query R
+SELECT 5.5 % 2
+----
+1.5
+
+# Any arithmetic involving NULL gives NULL, typed by the other operand.
+query IRI
+SELECT 1 + NULL, NULL * 2.5, -NULL + 1
+----
+NULL NULL NULL
+
+statement error integer out of range
+SELECT 9223372036854775807 + 1
+
+statement error integer out of range
+SELECT -9223372036854775807 - 2
+
+statement error integer out of range
+SELECT 4611686018427387904 * 2
+
+query I
+SELECT -9223372036854775807 - 1
+----
+-9223372036854775808
+
+# i64::MIN can't be written as a literal: the lexer reads 9223372036854775808
+# before the parser sees the minus. Compute it instead, as above.
+statement error line 1, col 9: numeric literal out of range
+SELECT -9223372036854775808
+
+# FLOAT overflow is an error too, as in Postgres, so inf and NaN never arise.
+# The literal is 1e308, close to the largest FLOAT.
+statement error float out of range
+SELECT 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0 * 10.0
+
+statement error float out of range
+SELECT 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0 + 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0
+
+statement error float out of range
+SELECT -(100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0 * 10.0) < 1.0
+
+# Arithmetic on only NULLs is typed INT, so it can't stand in for BOOL or TEXT.
+query II
+SELECT NULL + NULL, -NULL
+----
+NULL NULL
+
+statement error operator NOT cannot be applied to INT
+SELECT NOT (NULL + NULL)
+
+statement error operator \|\| cannot be applied to INT and TEXT
+SELECT (NULL + NULL) || 'a'
+
+statement error operator \|\| cannot be applied to INT and TEXT
+SELECT (1 + NULL) || 'a'
+
+statement error division by zero
+SELECT 1 / 0
+
+statement error division by zero
+SELECT 1 % 0
+
+statement error division by zero
+SELECT 1.5 / 0
+
+statement error division by zero
+SELECT 1.5 % 0.0
+
+# NULL propagates before any division happens, as in Postgres.
+query I
+SELECT NULL / 0
+----
+NULL
+
+# The one INT division that overflows.
+statement error integer out of range
+SELECT (-9223372036854775807 - 1) / -1
+
+query I
+SELECT (-9223372036854775807 - 1) % -1
+----
+0

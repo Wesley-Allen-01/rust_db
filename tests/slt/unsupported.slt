@@ -1,7 +1,4 @@
-# Placeholder until the parser lands: every Statement is rejected.
-
-statement error not yet supported
-SELECT 1;
+# Statements whose slices have not landed yet are rejected.
 
 statement error not yet supported
 CREATE TABLE users (id INT);

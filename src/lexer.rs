@@ -147,8 +147,17 @@ pub enum LexErrorKind {
 
 impl fmt::Display for LexError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "line {}, col {}: ", self.pos.line, self.pos.col)?;
-        match self.kind {
+        write!(
+            f,
+            "line {}, col {}: {}",
+            self.pos.line, self.pos.col, self.kind
+        )
+    }
+}
+
+impl fmt::Display for LexErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
             LexErrorKind::UnexpectedChar(c) => write!(f, "unexpected character '{c}'"),
             LexErrorKind::NumberOutOfRange => write!(f, "numeric literal out of range"),
             LexErrorKind::UnterminatedString => write!(f, "unterminated string literal"),

@@ -1,0 +1,29 @@
+# Literals in SELECT without FROM.
+# Column type letters: I = INT, R = FLOAT, T = TEXT, B = BOOL.
+# A Column that is only ever NULL is TEXT, like Postgres's "unknown".
+
+query I
+SELECT 1;
+----
+1
+
+query IRTBB
+SELECT 42, 2.5, 'hello', TRUE, false
+----
+42 2.5 hello true false
+
+query T
+SELECT NULL;
+----
+NULL
+
+query T
+SELECT '';
+----
+(empty)
+
+# Keywords are case-insensitive; text keeps its case.
+query T
+select 'MiXeD'
+----
+MiXeD

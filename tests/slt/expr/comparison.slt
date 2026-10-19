@@ -1,0 +1,52 @@
+# Comparisons: = <> < <= > >= on every Data Type.
+
+query BBBBBB
+SELECT 1 = 1, 1 <> 1, 1 < 2, 2 <= 2, 1 > 2, 3 >= 2
+----
+true false true true false true
+
+# INT and FLOAT compare through Coercion.
+query BBB
+SELECT 1 = 1.0, 2 > 1.5, 0.5 < 1
+----
+true true true
+
+query BBB
+SELECT 'abc' = 'abc', 'abc' < 'abd', 'B' < 'a'
+----
+true true true
+
+query BB
+SELECT TRUE = TRUE, FALSE < TRUE
+----
+true true
+
+# Comparisons involving NULL are unknown, which is NULL.
+query BBB
+SELECT NULL = NULL, 1 <> NULL, NULL < 'a'
+----
+NULL NULL NULL
+
+# Arithmetic binds tighter than comparison.
+query B
+SELECT 1 + 1 = 2
+----
+true
+
+# Comparisons don't chain, as in Postgres. Parenthesise to compare a BOOL.
+statement error line 1, col 14: comparison operators cannot be chained
+SELECT 1 < 2 < 3
+
+statement error line 1, col 14: comparison operators cannot be chained
+SELECT 1 = 1 = TRUE
+
+query B
+SELECT (1 = 1) = TRUE
+----
+true
+
+statement error operator = cannot be applied to INT and TEXT
+SELECT 1 = 'a'
+
+statement error operator < cannot be applied to BOOL and INT
+SELECT TRUE < 1

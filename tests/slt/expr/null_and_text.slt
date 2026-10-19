@@ -1,0 +1,51 @@
+# IS [NOT] NULL and || concatenation.
+
+query BBBB
+SELECT NULL IS NULL, 1 IS NULL, NULL IS NOT NULL, 'a' IS NOT NULL
+----
+true false false true
+
+# IS NULL is never unknown, even of an unknown comparison.
+query BB
+SELECT (1 = NULL) IS NULL, 1 + NULL IS NULL
+----
+true true
+
+# IS binds looser than comparison: (1 = 1) IS NOT NULL.
+query B
+SELECT 1 = 1 IS NOT NULL
+----
+true
+
+statement error line 1, col 13: expected NULL
+SELECT 1 IS 2
+
+query T
+SELECT 'a' || 'b' || 'c'
+----
+abc
+
+query TT
+SELECT 'a' || NULL, NULL || NULL
+----
+NULL NULL
+
+query T
+SELECT '' || 'x'
+----
+x
+
+# || binds looser than + but tighter than comparison.
+query B
+SELECT 'ab' = 'a' || 'b'
+----
+true
+
+statement error operator || cannot be applied to TEXT and INT
+SELECT 'a' || 1
+
+statement error operator - cannot be applied to TEXT
+SELECT -'a'
+
+statement error operator \+ cannot be applied to TEXT and INT
+SELECT 'a' + 1

@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,7 +20,7 @@ impl fmt::Display for DataType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Int(i64),
     Float(f64),
@@ -93,35 +92,6 @@ impl fmt::Display for Value {
     }
 }
 
-impl PartialOrd for Value {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        match (self, other) {
-            (Value::Null, _) | (_, Value::Null) => None,
-
-            (Value::Int(a), Value::Int(b)) => a.partial_cmp(b),
-            (Value::Float(a), Value::Float(b)) => a.partial_cmp(b),
-
-            (Value::Int(a), Value::Float(b)) => (*a as f64).partial_cmp(b),
-            (Value::Float(a), Value::Int(b)) => a.partial_cmp(&(*b as f64)),
-
-            (Value::Text(a), Value::Text(b)) => a.partial_cmp(b),
-            (Value::Bool(a), Value::Bool(b)) => a.partial_cmp(b),
-
-            _ => None,
-        }
-    }
-}
-
-impl PartialEq for Value {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Value::Null, Value::Null) => true,
-            (Value::Null, _) | (_, Value::Null) => false,
-            _ => self.partial_cmp(other) == Some(Ordering::Equal),
-        }
-    }
-}
-
 impl From<i64> for Value {
     fn from(i: i64) -> Self {
         Value::Int(i)
@@ -176,26 +146,14 @@ mod tests {
         assert!(!Value::Float(3.2).fits(DataType::Int));
     }
 
+    // Rust equality is structural, for tests and lookups. SQL comparison
+    // (Coercion, NULL is unknown) lives in the evaluator.
     #[test]
-    fn numerics_cmp_across_int_and_float() {
-        assert_eq!(Value::Int(1), Value::Float(1.0));
-        assert!(Value::Float(3.4) > Value::Int(3));
-    }
-
-    #[test]
-    fn different_types_are_incompatible() {
-        let s = Value::Text("hello".into());
-        let i = Value::Int(3);
-
-        assert_eq!(s.partial_cmp(&i), None);
-        assert!(s != i);
-        assert!(!((s <= i) && (i <= s)));
-    }
-
-    #[test]
-    fn null_is_never_ordered() {
-        assert_eq!(Value::Null.partial_cmp(&Value::Null), None);
-        assert_eq!(Value::Null.partial_cmp(&Value::Int(1)), None);
+    fn rust_equality_is_structural() {
+        assert_ne!(Value::Int(1), Value::Float(1.0));
+        assert_ne!(Value::Text("1".into()), Value::Int(1));
+        assert_eq!(Value::Null, Value::Null);
+        assert_eq!(Value::Text("a".into()), Value::Text("a".into()));
     }
 
     #[test]
