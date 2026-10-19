@@ -67,18 +67,33 @@ impl Table {
         self.rows.is_empty()
     }
 
+    /// Applies Coercion, validates the Row, and returns its new Row ID.
     pub fn insert(&mut self, values: Vec<Value>) -> Result<usize> {
-        self.schema.validate_row(&values)?;
+        let values = self.schema.coerce_row(values)?;
+        Ok(self.push(values))
+    }
 
+    /// Inserts every Row or none: all are coerced and validated before any
+    /// is added. Returns their Row IDs in order.
+    pub fn insert_all(&mut self, rows: Vec<Vec<Value>>) -> Result<Vec<usize>> {
+        let rows = rows
+            .into_iter()
+            .map(|values| self.schema.coerce_row(values))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(rows.into_iter().map(|values| self.push(values)).collect())
+    }
+
+    /// Adds a Row that has already been coerced and validated.
+    fn push(&mut self, values: Vec<Value>) -> usize {
         // IDs only ever increase, so a deleted row's ID is never handed out again.
         let id = self.next_id;
         self.next_id += 1;
         self.rows.insert(id, Row(values));
-        Ok(id)
+        id
     }
 
     pub fn update(&mut self, id: usize, values: Vec<Value>) -> Result<bool> {
-        self.schema.validate_row(&values)?;
+        let values = self.schema.coerce_row(values)?;
         match self.rows.get_mut(&id) {
             Some(row) => {
                 *row = Row(values);
@@ -155,6 +170,56 @@ mod tests {
         assert_eq!(u.len(), 0);
         // A rejected insert must not use up an ID.
         assert_eq!(u.insert(vec![1.into(), "ada".into(), true.into()]), Ok(0));
+    }
+
+    fn scores() -> Table {
+        let schema = Schema::new(vec![
+            Column::new("name", DataType::Text).not_null(),
+            Column::new("score", DataType::Float),
+        ])
+        .unwrap();
+        Table::new("scores", schema)
+    }
+
+    #[test]
+    fn insert_coerces_an_int_into_a_float_column() {
+        let mut t = scores();
+        let id = t.insert(vec!["ada".into(), 7.into()]).unwrap();
+        assert_eq!(t.get(id).unwrap()[1], Value::Float(7.0));
+    }
+
+    #[test]
+    fn insert_all_inserts_every_row_in_order() {
+        let mut t = scores();
+        let ids = t
+            .insert_all(vec![
+                vec!["ada".into(), 1.5.into()],
+                vec!["bob".into(), 2.into()],
+            ])
+            .unwrap();
+        assert_eq!(ids, vec![0, 1]);
+        assert_eq!(t.get(1).unwrap()[1], Value::Float(2.0));
+    }
+
+    #[test]
+    fn insert_all_leaves_the_table_unchanged_if_any_row_fails() {
+        let mut t = scores();
+        let err = t
+            .insert_all(vec![
+                vec!["ada".into(), 1.5.into()],
+                vec!["bob".into(), 2.5.into()],
+                vec![Value::Null, 3.5.into()],
+            ])
+            .unwrap_err();
+        assert_eq!(
+            err,
+            DbError::NotNullViolation {
+                column: "name".to_string()
+            }
+        );
+        assert_eq!(t.len(), 0);
+        // No IDs were used up either.
+        assert_eq!(t.insert(vec!["cy".into(), Value::Null]), Ok(0));
     }
 
     #[test]

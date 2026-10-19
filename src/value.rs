@@ -51,6 +51,16 @@ impl Value {
         }
     }
 
+    /// This Value as `target`, applying Coercion (INT to FLOAT) if needed.
+    /// NULL becomes any Data Type. `None` if the Value can't become `target`.
+    pub fn coerce_to(self, target: DataType) -> Option<Value> {
+        match self {
+            Value::Int(i) if target == DataType::Float => Some(Value::Float(i as f64)),
+            value if value.fits(target) => Some(value),
+            _ => None,
+        }
+    }
+
     pub fn as_int(&self) -> Option<i64> {
         match self {
             Value::Int(i) => Some(*i),
@@ -154,6 +164,25 @@ mod tests {
         assert_ne!(Value::Text("1".into()), Value::Int(1));
         assert_eq!(Value::Null, Value::Null);
         assert_eq!(Value::Text("a".into()), Value::Text("a".into()));
+    }
+
+    #[test]
+    fn coercion_turns_an_int_into_a_float() {
+        assert_eq!(Value::Int(3).coerce_to(DataType::Float), Some(Value::Float(3.0)));
+    }
+
+    #[test]
+    fn coercion_leaves_matching_values_and_null_alone() {
+        assert_eq!(Value::Int(3).coerce_to(DataType::Int), Some(Value::Int(3)));
+        assert_eq!(Value::Null.coerce_to(DataType::Float), Some(Value::Null));
+    }
+
+    #[test]
+    fn coercion_is_only_int_to_float() {
+        assert_eq!(Value::Float(3.0).coerce_to(DataType::Int), None);
+        assert_eq!(Value::Int(1).coerce_to(DataType::Text), None);
+        assert_eq!(Value::Text("1".into()).coerce_to(DataType::Int), None);
+        assert_eq!(Value::Bool(true).coerce_to(DataType::Int), None);
     }
 
     #[test]

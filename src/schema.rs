@@ -114,13 +114,31 @@ impl Schema {
             })
     }
 
-    pub fn validate_row(&self, row: &[Value]) -> Result<()> {
+    /// Applies Coercion to each Value, then validates the Row. Values that
+    /// can't be coerced are left as they are, for `validate_row` to reject.
+    pub fn coerce_row(&self, mut row: Vec<Value>) -> Result<Vec<Value>> {
+        self.check_arity(&row)?;
+        for (value, col) in row.iter_mut().zip(&self.columns) {
+            if let Some(coerced) = value.clone().coerce_to(col.data_type) {
+                *value = coerced;
+            }
+        }
+        self.validate_row(&row)?;
+        Ok(row)
+    }
+
+    fn check_arity(&self, row: &[Value]) -> Result<()> {
         if row.len() != self.len() {
             return Err(DbError::ArityMismatch {
                 expected: self.len(),
                 got: row.len(),
             });
         }
+        Ok(())
+    }
+
+    pub fn validate_row(&self, row: &[Value]) -> Result<()> {
+        self.check_arity(row)?;
 
         for (col, val) in self.columns.iter().zip(row) {
             if col.not_null && val.is_null() {
@@ -228,7 +246,7 @@ mod tests {
         let row = vec![
             Value::Int(1),
             Value::Text("Wesley".into()),
-            Value::Int(100),
+            Value::Text("high".into()),
             Value::Bool(false),
         ];
 
@@ -237,9 +255,58 @@ mod tests {
             DbError::TypeMismatch {
                 column: "score".to_string(),
                 expected: DataType::Float,
-                got: Some(DataType::Int)
+                got: Some(DataType::Text)
             }
         )
+    }
+
+    #[test]
+    fn coerce_row_turns_an_int_into_a_float_column_into_a_float() {
+        let row = vec![
+            Value::Int(1),
+            Value::Text("Wesley".into()),
+            Value::Int(100),
+            Value::Bool(false),
+        ];
+        assert_eq!(
+            users().coerce_row(row),
+            Ok(vec![
+                Value::Int(1),
+                Value::Text("Wesley".into()),
+                Value::Float(100.0),
+                Value::Bool(false),
+            ])
+        );
+    }
+
+    #[test]
+    fn coerce_row_rejects_extra_values() {
+        let row = vec![Value::Null; 5];
+        assert_eq!(
+            users().coerce_row(row).unwrap_err(),
+            DbError::ArityMismatch {
+                expected: 4,
+                got: 5
+            }
+        );
+    }
+
+    #[test]
+    fn coerce_row_still_rejects_other_mismatches() {
+        let row = vec![
+            Value::Float(1.0),
+            Value::Null,
+            Value::Null,
+            Value::Null,
+        ];
+        assert_eq!(
+            users().coerce_row(row).unwrap_err(),
+            DbError::TypeMismatch {
+                column: "id".to_string(),
+                expected: DataType::Int,
+                got: Some(DataType::Float)
+            }
+        );
     }
 
     fn accounts() -> Schema {
