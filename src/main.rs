@@ -1,8 +1,7 @@
 //! The REPL binary: reads lines, runs Meta Commands and Statements, prints results.
 
 use rust_db::database::Database;
-use rust_db::execute::execute;
-use rust_db::repl::input::{Input, InputBuffer, split_statements};
+use rust_db::repl::input::{Input, InputBuffer, execute_all};
 use rust_db::repl::meta::{MetaOutcome, run_meta};
 use rust_db::repl::render::render_output;
 use rustyline::DefaultEditor;
@@ -45,25 +44,17 @@ fn main() -> rustyline::Result<()> {
                     Err(message) => eprintln!("ERROR: {message}"),
                 }
             }
-            Some(Input::Statement(sql)) => {
+            Some(Input::Sql(sql)) => {
                 editor.add_history_entry(sql.as_str())?;
-                run_statements(&mut db, &sql);
+                for result in execute_all(&mut db, &sql) {
+                    match result {
+                        Ok(output) => print!("{}", render_output(&output)),
+                        Err(err) => eprintln!("ERROR: {err}"),
+                    }
+                }
             }
         }
     }
 
     Ok(())
-}
-
-/// Runs each Statement in turn. Like psql, the first error skips the rest.
-fn run_statements(db: &mut Database, sql: &str) {
-    for statement in split_statements(sql) {
-        match execute(db, statement) {
-            Ok(output) => print!("{}", render_output(&output)),
-            Err(err) => {
-                eprintln!("ERROR: {err}");
-                return;
-            }
-        }
-    }
 }

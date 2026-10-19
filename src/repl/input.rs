@@ -1,15 +1,19 @@
-//! Turns REPL input lines into complete Meta Commands and Statements.
+//! Turns REPL input lines into Meta Commands and Statements, and runs the Statements.
 
+use crate::database::Database;
+use crate::error::Result;
+use crate::execute::{Output, execute};
 use crate::lexer::{LexErrorKind, Token, tokenize};
 
 /// A complete piece of input, ready to run.
 #[derive(Debug, PartialEq)]
 pub enum Input {
     Meta(String),
-    Statement(String),
+    /// SQL ending in `;`: one Statement, or several typed together.
+    Sql(String),
 }
 
-/// Buffers lines until a Statement is finished by `;`.
+/// Buffers lines until the SQL in them is finished by `;`.
 #[derive(Debug, Default)]
 pub struct InputBuffer {
     text: String,
@@ -20,7 +24,7 @@ impl InputBuffer {
         InputBuffer::default()
     }
 
-    /// Adds a line. Returns a Meta Command at once, or a Statement once it ends with `;`.
+    /// Adds a line. Returns a Meta Command at once, or the SQL once it ends with `;`.
     pub fn push(&mut self, line: &str) -> Option<Input> {
         if self.is_empty() && line.trim().is_empty() {
             return None;
@@ -36,7 +40,7 @@ impl InputBuffer {
 
         self.text.push_str(line);
         if is_complete(&self.text) {
-            Some(Input::Statement(std::mem::take(&mut self.text)))
+            Some(Input::Sql(std::mem::take(&mut self.text)))
         } else {
             None
         }
@@ -55,6 +59,21 @@ impl InputBuffer {
     fn in_open_string(&self) -> bool {
         tokenize(&self.text).is_err_and(|err| err.kind == LexErrorKind::UnterminatedString)
     }
+}
+
+/// Runs each Statement in the SQL in turn. Like psql, the first error skips
+/// the rest, so it is the last result.
+pub fn execute_all(db: &mut Database, sql: &str) -> Vec<Result<Output>> {
+    let mut results = Vec::new();
+    for statement in split_statements(sql) {
+        let result = execute(db, statement);
+        let failed = result.is_err();
+        results.push(result);
+        if failed {
+            break;
+        }
+    }
+    results
 }
 
 /// Splits complete input into its Statements, each ending at its `;`, as psql
@@ -100,7 +119,7 @@ mod tests {
     use super::*;
 
     fn statement(text: &str) -> Option<Input> {
-        Some(Input::Statement(text.to_string()))
+        Some(Input::Sql(text.to_string()))
     }
 
     #[test]
@@ -219,6 +238,19 @@ mod tests {
             split_statements("SELECT 1; SELECT @"),
             vec!["SELECT 1; SELECT @"]
         );
+    }
+
+    #[test]
+    fn execute_all_stops_at_the_first_error() {
+        let mut db = Database::new();
+        let results = execute_all(
+            &mut db,
+            "CREATE TABLE a (id INT); SELECT x; CREATE TABLE b (id INT);",
+        );
+        assert_eq!(results.len(), 2);
+        assert!(results[0].is_ok());
+        assert!(results[1].is_err());
+        assert_eq!(db.table_names(), vec!["a"]);
     }
 
     #[test]

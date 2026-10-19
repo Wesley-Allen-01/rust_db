@@ -38,7 +38,7 @@ A named, typed slot in a Schema. Column names are case-insensitive.
 _Avoid_: field, attribute
 
 **Row**:
-One record in a Table: an ordered list of Values, one per Column.
+The unit of data a Table holds: an ordered list of Values, one per Column.
 _Avoid_: record, tuple, entry
 
 **Constraint**:
