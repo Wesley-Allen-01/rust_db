@@ -6,6 +6,9 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     Keyword(Keyword),
+    /// An unquoted identifier, folded to lowercase because names are
+    /// case-insensitive.
+    Ident(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,7 +92,10 @@ impl Lexer {
             word.push(c);
             self.bump();
         }
-        Token::Keyword(Keyword::from_word(&word).unwrap())
+        match Keyword::from_word(&word) {
+            Some(keyword) => Token::Keyword(keyword),
+            None => Token::Ident(word.to_lowercase()),
+        }
     }
 
     fn peek(&self) -> Option<char> {
@@ -132,5 +138,27 @@ mod tests {
             tokens("SELECT select SeLeCt"),
             vec![Token::Keyword(Keyword::Select); 3]
         );
+    }
+
+    #[test]
+    fn identifiers_fold_to_lowercase() {
+        assert_eq!(
+            tokens("Users my_col2 rowid"),
+            vec![
+                Token::Ident("users".into()),
+                Token::Ident("my_col2".into()),
+                Token::Ident("rowid".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn tokens_carry_line_and_column() {
+        let positions: Vec<(usize, usize)> = tokenize("select\n  name\n\tx")
+            .unwrap()
+            .into_iter()
+            .map(|t| (t.pos.line, t.pos.col))
+            .collect();
+        assert_eq!(positions, vec![(1, 1), (2, 3), (3, 2)]);
     }
 }
