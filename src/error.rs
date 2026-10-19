@@ -72,8 +72,6 @@ pub enum DbError {
 
     DivisionByZero,
 
-    NotYetSupported,
-
     /// An ORDER BY name that matches several different output Columns.
     AmbiguousColumn {
         name: String,
@@ -171,10 +169,6 @@ impl fmt::Display for DbError {
             DbError::FloatOverflow => write!(f, "float out of range"),
 
             DbError::DivisionByZero => write!(f, "division by zero"),
-
-            DbError::NotYetSupported => {
-                write!(f, "not yet supported")
-            }
 
             DbError::AmbiguousColumn { name } => {
                 write!(f, "column name `{name}` is ambiguous")
