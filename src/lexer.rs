@@ -118,15 +118,23 @@ pub struct Position {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Spanned {
+pub struct PositionedToken {
     pub token: Token,
     pub pos: Position,
 }
 
+/// Kept separate from `DbError` so the lexer stays free of crate
+/// dependencies; the parser decides how to surface it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LexError {
     pub pos: Position,
     pub kind: LexErrorKind,
+}
+
+impl LexError {
+    fn new(pos: Position, kind: LexErrorKind) -> LexError {
+        LexError { pos, kind }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,15 +161,19 @@ impl fmt::Display for LexError {
 
 impl std::error::Error for LexError {}
 
-pub fn tokenize(sql: &str) -> Result<Vec<Spanned>, LexError> {
+pub fn tokenize(sql: &str) -> Result<Vec<PositionedToken>, LexError> {
     Lexer::new(sql).run()
+}
+
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
 }
 
 struct Lexer {
     chars: Vec<char>,
     i: usize,
-    line: usize,
-    col: usize,
+    /// Where `chars[i]` sits in the source.
+    pos: Position,
 }
 
 impl Lexer {
@@ -169,23 +181,22 @@ impl Lexer {
         Lexer {
             chars: sql.chars().collect(),
             i: 0,
-            line: 1,
-            col: 1,
+            pos: Position { line: 1, col: 1 },
         }
     }
 
-    fn run(mut self) -> Result<Vec<Spanned>, LexError> {
+    fn run(mut self) -> Result<Vec<PositionedToken>, LexError> {
         let mut out = Vec::new();
         while let Some(c) = self.peek() {
             if c.is_whitespace() {
                 self.bump();
                 continue;
             }
-            if c == '-' && self.chars.get(self.i + 1) == Some(&'-') {
+            if c == '-' && self.peek_next() == Some('-') {
                 self.skip_comment();
                 continue;
             }
-            let pos = self.pos();
+            let pos = self.pos;
             let token = if c.is_alphabetic() || c == '_' {
                 self.word()
             } else if c == '\'' {
@@ -195,14 +206,14 @@ impl Lexer {
             } else {
                 self.symbol(c, pos)?
             };
-            out.push(Spanned { token, pos });
+            out.push(PositionedToken { token, pos });
         }
         Ok(out)
     }
 
     fn word(&mut self) -> Token {
         let mut word = String::new();
-        while let Some(c) = self.peek().filter(|c| c.is_alphanumeric() || *c == '_') {
+        while let Some(c) = self.peek().filter(|c| is_word_char(*c)) {
             word.push(c);
             self.bump();
         }
@@ -212,34 +223,37 @@ impl Lexer {
         }
     }
 
-    /// Digits, optionally followed by `.` and more digits for a float.
     fn number(&mut self, pos: Position) -> Result<Token, LexError> {
         let mut text = self.digits();
-        let digit_after_dot = self.chars.get(self.i + 1).is_some_and(char::is_ascii_digit);
-        if self.peek() == Some('.') && digit_after_dot {
+        // `1.x` is `1` then `.`; only a digit after the dot makes a float.
+        let digit_after_dot = self.peek_next().is_some_and(|c| c.is_ascii_digit());
+        let is_float = self.peek() == Some('.') && digit_after_dot;
+        if is_float {
             self.bump();
             text.push('.');
             text.push_str(&self.digits());
+        }
+        // Without this, `123abc` or `1e5` would quietly split into two tokens.
+        if let Some(c) = self.peek().filter(|c| is_word_char(*c)) {
+            return Err(LexError::new(self.pos, LexErrorKind::UnexpectedChar(c)));
+        }
+        if is_float {
             // Digits and one dot always parse as a float.
             return Ok(Token::Float(text.parse().unwrap()));
         }
         // Only digits remain, so the parse can fail only by overflowing.
-        text.parse().map(Token::Integer).map_err(|_| LexError {
-            pos,
-            kind: LexErrorKind::IntegerOutOfRange,
-        })
+        text.parse()
+            .map(Token::Integer)
+            .map_err(|_| LexError::new(pos, LexErrorKind::IntegerOutOfRange))
     }
 
     fn text(&mut self, pos: Position) -> Result<Token, LexError> {
-        self.bump(); // opening quote
+        self.bump(); // past the opening quote; `pos` still points at it for errors
         let mut text = String::new();
         loop {
             match self.peek() {
                 None => {
-                    return Err(LexError {
-                        pos,
-                        kind: LexErrorKind::UnterminatedString,
-                    });
+                    return Err(LexError::new(pos, LexErrorKind::UnterminatedString));
                 }
                 Some('\'') => {
                     self.bump();
@@ -287,10 +301,7 @@ impl Lexer {
             '.' => Token::Dot,
             // Rejected outright so names stay case-insensitive everywhere.
             '"' => {
-                return Err(LexError {
-                    pos,
-                    kind: LexErrorKind::QuotedIdentifier,
-                });
+                return Err(LexError::new(pos, LexErrorKind::QuotedIdentifier));
             }
             '<' if self.eat('=') => Token::LtEq,
             '<' if self.eat('>') => Token::NotEq,
@@ -299,16 +310,13 @@ impl Lexer {
             '>' => Token::Gt,
             '|' if self.eat('|') => Token::Concat,
             _ => {
-                return Err(LexError {
-                    pos,
-                    kind: LexErrorKind::UnexpectedChar(c),
-                });
+                return Err(LexError::new(pos, LexErrorKind::UnexpectedChar(c)));
             }
         };
         Ok(token)
     }
 
-    /// Consumes the next character if it is `expected`.
+    /// Lets two-character operators like `<=` be matched in a single arm.
     fn eat(&mut self, expected: char) -> bool {
         if self.peek() == Some(expected) {
             self.bump();
@@ -322,19 +330,16 @@ impl Lexer {
         self.chars.get(self.i).copied()
     }
 
-    fn pos(&self) -> Position {
-        Position {
-            line: self.line,
-            col: self.col,
-        }
+    fn peek_next(&self) -> Option<char> {
+        self.chars.get(self.i + 1).copied()
     }
 
     fn bump(&mut self) {
         if self.peek() == Some('\n') {
-            self.line += 1;
-            self.col = 1;
+            self.pos.line += 1;
+            self.pos.col = 1;
         } else {
-            self.col += 1;
+            self.pos.col += 1;
         }
         self.i += 1;
     }
@@ -350,6 +355,14 @@ mod tests {
             .into_iter()
             .map(|t| t.token)
             .collect()
+    }
+
+    fn error(sql: &str) -> LexError {
+        tokenize(sql).expect_err("should fail to lex")
+    }
+
+    fn at(line: usize, col: usize) -> Position {
+        Position { line, col }
     }
 
     #[test]
@@ -428,6 +441,18 @@ mod tests {
     }
 
     #[test]
+    fn rejects_a_letter_straight_after_a_number() {
+        let err = error("select 123abc");
+        assert_eq!(err.kind, LexErrorKind::UnexpectedChar('a'));
+        assert_eq!(err.pos, at(1, 11));
+
+        // Exponents aren't supported, so they must fail rather than lex as `1`, `e5`.
+        let err = error("1e5");
+        assert_eq!(err.kind, LexErrorKind::UnexpectedChar('e'));
+        assert_eq!(err.pos, at(1, 2));
+    }
+
+    #[test]
     fn rejects_an_integer_too_large_for_64_bits() {
         let err = error("select 9223372036854775808");
         assert_eq!(err.kind, LexErrorKind::IntegerOutOfRange);
@@ -482,13 +507,12 @@ mod tests {
 
     #[test]
     fn comments_run_to_the_end_of_the_line() {
-        let lexed = tokenize("select -- the rest is ignored: @ 'x\n  a -- trailing").unwrap();
-        let toks: Vec<_> = lexed.iter().map(|t| t.token.clone()).collect();
+        let sql = "select -- the rest is ignored: @ 'x\n  a -- trailing";
         assert_eq!(
-            toks,
+            tokens(sql),
             vec![Token::Keyword(Keyword::Select), Token::Ident("a".into())]
         );
-        assert_eq!(lexed[1].pos, at(2, 3));
+        assert_eq!(tokenize(sql).unwrap()[1].pos, at(2, 3));
     }
 
     #[test]
@@ -506,17 +530,17 @@ mod tests {
 
     #[test]
     fn lexes_a_whole_statement_with_positions() {
-        use Token::*;
+        use Token::{Comma, Concat, Float, Ident, Integer, Plus, Semicolon, Text};
         let lexed = tokenize("SELECT 1 + 2.5 AS x, 'a' || name;").unwrap();
         let got: Vec<(Token, usize)> = lexed.into_iter().map(|t| (t.token, t.pos.col)).collect();
         assert_eq!(
             got,
             vec![
-                (Keyword(self::Keyword::Select), 1),
+                (Token::Keyword(Keyword::Select), 1),
                 (Integer(1), 8),
                 (Plus, 10),
                 (Float(2.5), 12),
-                (Keyword(self::Keyword::As), 16),
+                (Token::Keyword(Keyword::As), 16),
                 (Ident("x".into()), 19),
                 (Comma, 20),
                 (Text("a".into()), 22),
@@ -531,14 +555,6 @@ mod tests {
     fn empty_and_blank_input_give_no_tokens() {
         assert_eq!(tokens(""), vec![]);
         assert_eq!(tokens("  \n -- only a comment"), vec![]);
-    }
-
-    fn error(sql: &str) -> LexError {
-        tokenize(sql).expect_err("should fail to lex")
-    }
-
-    fn at(line: usize, col: usize) -> Position {
-        Position { line, col }
     }
 
     #[test]
@@ -559,6 +575,8 @@ mod tests {
     #[test]
     fn identifiers_fold_to_lowercase() {
         assert_eq!(
+            // `rowid` must stay a plain name so the binder can reject it as
+            // an unknown column rather than the parser choking on a keyword.
             tokens("Users my_col2 rowid"),
             vec![
                 Token::Ident("users".into()),
