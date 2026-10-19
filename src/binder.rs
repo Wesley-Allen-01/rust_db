@@ -73,7 +73,9 @@ pub fn bind(_db: &Database, statement: Statement) -> Result<BoundStatement> {
             }
             Ok(BoundStatement::Select(BoundSelect { exprs, columns }))
         }
-        Statement::CreateTable(create) => bind_create_table(create).map(BoundStatement::CreateTable),
+        Statement::CreateTable(create) => {
+            bind_create_table(create).map(BoundStatement::CreateTable)
+        }
         Statement::DropTable(drop) => Ok(BoundStatement::DropTable(drop)),
     }
 }
@@ -84,7 +86,11 @@ fn bind_create_table(create: CreateTable) -> Result<BoundCreateTable> {
         .into_iter()
         .map(|def| {
             let column = Column::new(def.name, def.data_type);
-            if def.not_null { column.not_null() } else { column }
+            if def.not_null {
+                column.not_null()
+            } else {
+                column
+            }
         })
         .collect();
     Ok(BoundCreateTable {
