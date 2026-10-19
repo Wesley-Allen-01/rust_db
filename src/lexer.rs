@@ -11,6 +11,8 @@ pub enum Token {
     Ident(String),
     Integer(i64),
     Float(f64),
+    /// A single-quoted text literal, with `''` escapes already resolved.
+    Text(String),
     Plus,
     Minus,
     Star,
@@ -131,6 +133,7 @@ pub struct LexError {
 pub enum LexErrorKind {
     UnexpectedChar(char),
     IntegerOutOfRange,
+    UnterminatedString,
 }
 
 impl fmt::Display for LexError {
@@ -139,6 +142,7 @@ impl fmt::Display for LexError {
         match self.kind {
             LexErrorKind::UnexpectedChar(c) => write!(f, "unexpected character '{c}'"),
             LexErrorKind::IntegerOutOfRange => write!(f, "integer literal out of range"),
+            LexErrorKind::UnterminatedString => write!(f, "unterminated string literal"),
         }
     }
 }
@@ -176,6 +180,8 @@ impl Lexer {
             let pos = self.pos();
             let token = if c.is_alphabetic() || c == '_' {
                 self.word()
+            } else if c == '\'' {
+                self.text(pos)?
             } else if c.is_ascii_digit() {
                 self.number(pos)?
             } else {
@@ -214,6 +220,32 @@ impl Lexer {
             pos,
             kind: LexErrorKind::IntegerOutOfRange,
         })
+    }
+
+    fn text(&mut self, pos: Position) -> Result<Token, LexError> {
+        self.bump(); // opening quote
+        let mut text = String::new();
+        loop {
+            match self.peek() {
+                None => {
+                    return Err(LexError {
+                        pos,
+                        kind: LexErrorKind::UnterminatedString,
+                    });
+                }
+                Some('\'') => {
+                    self.bump();
+                    if !self.eat('\'') {
+                        return Ok(Token::Text(text));
+                    }
+                    text.push('\'');
+                }
+                Some(c) => {
+                    text.push(c);
+                    self.bump();
+                }
+            }
+        }
     }
 
     fn digits(&mut self) -> String {
@@ -382,6 +414,37 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "line 1, col 8: integer literal out of range"
+        );
+    }
+
+    #[test]
+    fn lexes_text_literals_keeping_case_and_spaces() {
+        assert_eq!(
+            tokens("'Hello, World' ''"),
+            vec![Token::Text("Hello, World".into()), Token::Text("".into())]
+        );
+    }
+
+    #[test]
+    fn doubled_single_quote_is_an_escaped_quote() {
+        assert_eq!(tokens("'it''s'"), vec![Token::Text("it's".into())]);
+    }
+
+    #[test]
+    fn text_literals_can_span_lines() {
+        let lexed = tokenize("'a\nb' x").unwrap();
+        assert_eq!(lexed[0].token, Token::Text("a\nb".into()));
+        assert_eq!(lexed[1].pos, at(2, 4));
+    }
+
+    #[test]
+    fn rejects_an_unterminated_string_at_its_opening_quote() {
+        let err = error("select 'abc''");
+        assert_eq!(err.kind, LexErrorKind::UnterminatedString);
+        assert_eq!(err.pos, at(1, 8));
+        assert_eq!(
+            err.to_string(),
+            "line 1, col 8: unterminated string literal"
         );
     }
 
