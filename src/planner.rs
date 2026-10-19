@@ -27,9 +27,55 @@ pub fn plan_matching_rows<'a>(
     filtered(Box::new(Scan::new(table)), filter)
 }
 
-fn filtered<'a>(child: Box<dyn Operator + 'a>, filter: Option<BoundExpr>) -> Box<dyn Operator + 'a> {
+fn filtered<'a>(
+    child: Box<dyn Operator + 'a>,
+    filter: Option<BoundExpr>,
+) -> Box<dyn Operator + 'a> {
     match filter {
         Some(predicate) => Box::new(Filter::new(child, predicate)),
         None => child,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::UnaryOp;
+    use crate::schema::{Column, Schema};
+    use crate::table::RowId;
+    use crate::value::{DataType, Value};
+
+    fn matching_row_ids(table: &Table, filter: Option<BoundExpr>) -> Vec<RowId> {
+        let mut plan = plan_matching_rows(table, filter);
+        let mut ids = Vec::new();
+        while let Some(row) = plan.next().unwrap() {
+            ids.push(row.row_id.expect("a Scanned Row has a Row ID"));
+        }
+        ids
+    }
+
+    #[test]
+    fn matching_rows_carry_the_row_ids_update_and_delete_act_on() {
+        let schema = Schema::new(vec![Column::new("on", DataType::Bool)]).unwrap();
+        let mut table = Table::new("t", schema);
+        for value in [
+            Value::Bool(true),
+            Value::Bool(false),
+            Value::Null,
+            Value::Bool(true),
+        ] {
+            table.insert(vec![value]).unwrap();
+        }
+        assert_eq!(matching_row_ids(&table, None), vec![0, 1, 2, 3]);
+        assert_eq!(
+            matching_row_ids(&table, Some(BoundExpr::Column(0))),
+            vec![0, 3]
+        );
+        // NOT NULL is still NULL, so Row 2 matches neither way.
+        let negated = BoundExpr::Unary {
+            op: UnaryOp::Not,
+            operand: Box::new(BoundExpr::Column(0)),
+        };
+        assert_eq!(matching_row_ids(&table, Some(negated)), vec![1]);
     }
 }

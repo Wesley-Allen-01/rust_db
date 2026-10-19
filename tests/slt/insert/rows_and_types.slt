@@ -28,6 +28,9 @@ INSERT INTO scores (name, score) VALUES ('gus', true);
 statement error column `name` is NOT NULL, got NULL
 INSERT INTO scores (name) VALUES (NULL || 'x');
 
+statement error column `name` is NOT NULL, got NULL
+INSERT INTO scores VALUES ('zed', 1.0, 1), (NULL, 1.0, 1);
+
 # Errors from evaluating a value fail the whole Statement.
 statement error division by zero
 INSERT INTO scores VALUES ('hal', 1.0, 1), ('ivy', 1.0, 1 / 0);
@@ -57,3 +60,15 @@ INSERT INTO scores VALUES ();
 
 statement error line 1, col 34: expected , or \)
 INSERT INTO scores VALUES ('x', 1
+
+# Every failed INSERT left the Table as it was, even when its first rows
+# were fine. The Rows that did go in hold their Coerced Values.
+query TRI
+SELECT * FROM scores;
+----
+ada 1.5 1
+bob 2.5 2
+cy NULL NULL
+dee 1.5 3
+eve 7 NULL
+fay 5 NULL

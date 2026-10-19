@@ -18,3 +18,39 @@ SELECT * FROM users;
 1 ada 9.5 true
 2 bob NULL false
 3 NULL 7 NULL
+
+# Expressions read the current Row's Columns, with Coercion where INT meets FLOAT.
+query IRT
+SELECT id * 10, score + id, name || '!' FROM users;
+----
+10 10.5 ada!
+20 NULL bob!
+30 10 NULL
+
+# Column and Table names are case-insensitive. Columns can repeat.
+query II
+SELECT ID, Id FROM USERS;
+----
+1 1
+2 2
+3 3
+
+# `*` can sit beside other items.
+query IITRBT
+SELECT id, *, name FROM users WHERE id = 1;
+----
+1 1 ada 9.5 true ada
+
+# Rows come back in Row ID order, which is insertion order, not value order.
+statement ok
+CREATE TABLE nums (n INT);
+
+statement ok
+INSERT INTO nums VALUES (3), (1), (2);
+
+query I
+SELECT n FROM nums;
+----
+3
+1
+2

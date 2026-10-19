@@ -1,0 +1,51 @@
+# Name and type errors in a SELECT are found before any Row is read.
+
+statement ok
+CREATE TABLE users (id INT, name TEXT);
+
+statement ok
+INSERT INTO users VALUES (1, 'ada');
+
+statement error no such table `nope`
+SELECT * FROM nope;
+
+statement error no such column `email`
+SELECT email FROM users;
+
+statement error no such column `email`
+SELECT id FROM users WHERE email = 'x';
+
+# The Row ID is the Table's own handle, not a Column.
+statement error no such column `rowid`
+SELECT rowid FROM users;
+
+# Without FROM there are no Columns to refer to.
+statement error no such column `id`
+SELECT id;
+
+statement error SELECT \* needs a table to read from
+SELECT *;
+
+# WHERE must be BOOL.
+statement error WHERE must be BOOL, got INT
+SELECT * FROM users WHERE id;
+
+statement error WHERE must be BOOL, got TEXT
+SELECT * FROM users WHERE name || 'x';
+
+# Type errors inside WHERE are caught like any other expression's.
+statement error operator = cannot be applied to INT and TEXT
+SELECT * FROM users WHERE id = 'a';
+
+statement error operator AND cannot be applied to BOOL and INT
+SELECT * FROM users WHERE id = 1 AND id;
+
+# A runtime error in WHERE fails the whole SELECT.
+statement error division by zero
+SELECT * FROM users WHERE id / 0 = 1;
+
+statement error line 1, col 15: expected a name
+SELECT * FROM 1;
+
+statement error line 1, col 27: expected an expression
+SELECT * FROM users WHERE ;

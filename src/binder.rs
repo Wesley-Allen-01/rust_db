@@ -209,7 +209,11 @@ fn bind_drop_table(db: &Database, drop: DropTable) -> Result<BoundStatement> {
 /// The Table named in FROM, if any, is the scope for every expression,
 /// including WHERE.
 fn bind_select(db: &Database, select: Select) -> Result<BoundStatement> {
-    let table = select.from.as_deref().map(|name| db.get(name)).transpose()?;
+    let table = select
+        .from
+        .as_deref()
+        .map(|name| db.get(name))
+        .transpose()?;
     let scope = table.map(Table::schema);
     let mut exprs = Vec::new();
     let mut columns = Vec::new();
@@ -304,7 +308,12 @@ fn bind_unary(op: UnaryOp, operand: Expr, scope: Option<&Schema>) -> Result<(Bou
     Ok((bound, result_ty))
 }
 
-fn bind_binary(op: BinaryOp, left: Expr, right: Expr, scope: Option<&Schema>) -> Result<(BoundExpr, ExprType)> {
+fn bind_binary(
+    op: BinaryOp,
+    left: Expr,
+    right: Expr,
+    scope: Option<&Schema>,
+) -> Result<(BoundExpr, ExprType)> {
     let (left, left_ty) = bind_expr(left, scope)?;
     let (right, right_ty) = bind_expr(right, scope)?;
     let mismatch = DbError::BinaryTypeMismatch {

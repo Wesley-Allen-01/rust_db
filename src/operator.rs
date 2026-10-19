@@ -123,3 +123,120 @@ impl Operator for Project<'_> {
         }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::BinaryOp;
+    use crate::error::DbError;
+    use crate::schema::{Column, Schema};
+    use crate::value::DataType;
+
+    fn drain(mut op: impl Operator) -> Vec<PlanRow> {
+        let mut rows = Vec::new();
+        while let Some(row) = op.next().unwrap() {
+            rows.push(row);
+        }
+        rows
+    }
+
+    fn row(row_id: Option<RowId>, values: Vec<Value>) -> PlanRow {
+        PlanRow { row_id, values }
+    }
+
+    /// A child Operator that yields the given Rows.
+    struct Rows(std::vec::IntoIter<PlanRow>);
+
+    impl Operator for Rows {
+        fn next(&mut self) -> Result<Option<PlanRow>> {
+            Ok(self.0.next())
+        }
+    }
+
+    fn child(rows: Vec<PlanRow>) -> Box<dyn Operator> {
+        Box::new(Rows(rows.into_iter()))
+    }
+
+    fn binary(op: BinaryOp, left: BoundExpr, right: BoundExpr) -> BoundExpr {
+        BoundExpr::Binary {
+            op,
+            left: Box::new(left),
+            right: Box::new(right),
+        }
+    }
+
+    #[test]
+    fn single_row_yields_one_empty_row_without_a_row_id() {
+        assert_eq!(drain(SingleRow::new()), vec![row(None, vec![])]);
+    }
+
+    #[test]
+    fn scan_yields_each_row_with_its_row_id_skipping_deleted_ones() {
+        let schema = Schema::new(vec![Column::new("n", DataType::Int)]).unwrap();
+        let mut table = Table::new("t", schema);
+        for n in [10, 20, 30] {
+            table.insert(vec![Value::Int(n)]).unwrap();
+        }
+        table.delete(1);
+        assert_eq!(
+            drain(Scan::new(&table)),
+            vec![
+                row(Some(0), vec![Value::Int(10)]),
+                row(Some(2), vec![Value::Int(30)]),
+            ]
+        );
+    }
+
+    #[test]
+    fn filter_keeps_only_rows_where_the_predicate_is_true() {
+        // n > 1 is FALSE for 1, NULL (unknown) for NULL, and TRUE for 2.
+        let predicate = binary(
+            BinaryOp::Gt,
+            BoundExpr::Column(0),
+            BoundExpr::Literal(Value::Int(1)),
+        );
+        let rows = child(vec![
+            row(Some(5), vec![Value::Int(1)]),
+            row(Some(6), vec![Value::Null]),
+            row(Some(7), vec![Value::Int(2)]),
+        ]);
+        assert_eq!(
+            drain(Filter::new(rows, predicate)),
+            vec![row(Some(7), vec![Value::Int(2)])]
+        );
+    }
+
+    #[test]
+    fn project_evaluates_each_expression_against_the_row_and_keeps_its_row_id() {
+        let exprs = vec![
+            BoundExpr::Column(1),
+            binary(
+                BinaryOp::Mul,
+                BoundExpr::Column(0),
+                BoundExpr::Literal(Value::Int(10)),
+            ),
+        ];
+        let rows = child(vec![row(
+            Some(3),
+            vec![Value::Int(4), Value::Text("a".into())],
+        )]);
+        assert_eq!(
+            drain(Project::new(rows, exprs)),
+            vec![row(Some(3), vec![Value::Text("a".into()), Value::Int(40)])]
+        );
+    }
+
+    #[test]
+    fn an_error_evaluating_a_row_is_returned_from_next() {
+        let exprs = vec![binary(
+            BinaryOp::Div,
+            BoundExpr::Column(0),
+            BoundExpr::Literal(Value::Int(0)),
+        )];
+        let rows = child(vec![row(Some(0), vec![Value::Int(1)])]);
+        assert_eq!(
+            Project::new(rows, exprs).next(),
+            Err(DbError::DivisionByZero)
+        );
+    }
+}

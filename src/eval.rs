@@ -19,9 +19,7 @@ pub fn eval(expr: &BoundExpr, row: &[Value]) -> Result<Value> {
             .coerce_to(DataType::Float)
             .expect("binder only wraps INT or NULL in ToFloat")),
         BoundExpr::Unary { op, operand } => unary(*op, eval(operand, row)?),
-        BoundExpr::Binary { op, left, right } => {
-            binary(*op, eval(left, row)?, eval(right, row)?)
-        }
+        BoundExpr::Binary { op, left, right } => binary(*op, eval(left, row)?, eval(right, row)?),
         BoundExpr::IsNull { operand, negated } => {
             let is_null = eval(operand, row)?.is_null();
             Ok(Value::Bool(is_null != *negated))
