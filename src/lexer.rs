@@ -14,14 +14,77 @@ pub enum Token {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Keyword {
     Select,
+    From,
+    Where,
+    Insert,
+    Into,
+    Values,
+    Create,
+    Table,
+    Drop,
+    Update,
+    Set,
+    Delete,
+    Order,
+    By,
+    Limit,
+    Offset,
+    Asc,
+    Desc,
+    True,
+    False,
+    Null,
+    Not,
+    And,
+    Or,
+    Is,
+    If,
+    Exists,
+    As,
+    Int,
+    Float,
+    Text,
+    Bool,
 }
 
 impl Keyword {
     fn from_word(word: &str) -> Option<Keyword> {
-        match word.to_ascii_uppercase().as_str() {
-            "SELECT" => Some(Keyword::Select),
-            _ => None,
-        }
+        let keyword = match word.to_ascii_uppercase().as_str() {
+            "SELECT" => Keyword::Select,
+            "FROM" => Keyword::From,
+            "WHERE" => Keyword::Where,
+            "INSERT" => Keyword::Insert,
+            "INTO" => Keyword::Into,
+            "VALUES" => Keyword::Values,
+            "CREATE" => Keyword::Create,
+            "TABLE" => Keyword::Table,
+            "DROP" => Keyword::Drop,
+            "UPDATE" => Keyword::Update,
+            "SET" => Keyword::Set,
+            "DELETE" => Keyword::Delete,
+            "ORDER" => Keyword::Order,
+            "BY" => Keyword::By,
+            "LIMIT" => Keyword::Limit,
+            "OFFSET" => Keyword::Offset,
+            "ASC" => Keyword::Asc,
+            "DESC" => Keyword::Desc,
+            "TRUE" => Keyword::True,
+            "FALSE" => Keyword::False,
+            "NULL" => Keyword::Null,
+            "NOT" => Keyword::Not,
+            "AND" => Keyword::And,
+            "OR" => Keyword::Or,
+            "IS" => Keyword::Is,
+            "IF" => Keyword::If,
+            "EXISTS" => Keyword::Exists,
+            "AS" => Keyword::As,
+            "INT" => Keyword::Int,
+            "FLOAT" => Keyword::Float,
+            "TEXT" => Keyword::Text,
+            "BOOL" => Keyword::Bool,
+            _ => return None,
+        };
+        Some(keyword)
     }
 }
 
@@ -138,6 +201,21 @@ mod tests {
             tokens("SELECT select SeLeCt"),
             vec![Token::Keyword(Keyword::Select); 3]
         );
+    }
+
+    #[test]
+    fn recognises_every_keyword() {
+        use Keyword::*;
+        let sql = "select from where insert into values create table drop \
+                   update set delete order by limit offset asc desc \
+                   true false null not and or is if exists as \
+                   int float text bool";
+        let expected = [
+            Select, From, Where, Insert, Into, Values, Create, Table, Drop, Update, Set, Delete,
+            Order, By, Limit, Offset, Asc, Desc, True, False, Null, Not, And, Or, Is, If, Exists,
+            As, Int, Float, Text, Bool,
+        ];
+        assert_eq!(tokens(sql), expected.map(Token::Keyword).to_vec());
     }
 
     #[test]
