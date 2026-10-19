@@ -8,6 +8,14 @@ pub enum DataType {
     Bool,
 }
 
+impl DataType {
+    /// Whether a Value of this Data Type can stand where `target` is needed:
+    /// the same Data Type, or INT going to FLOAT (Coercion).
+    pub fn coerces_to(self, target: DataType) -> bool {
+        self == target || (self, target) == (DataType::Int, DataType::Float)
+    }
+}
+
 impl fmt::Display for DataType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = match self {
@@ -54,9 +62,9 @@ impl Value {
     /// This Value as `target`, applying Coercion (INT to FLOAT) if needed.
     /// NULL becomes any Data Type. `None` if the Value can't become `target`.
     pub fn coerce_to(self, target: DataType) -> Option<Value> {
-        match self {
-            Value::Int(i) if target == DataType::Float => Some(Value::Float(i as f64)),
-            value if value.fits(target) => Some(value),
+        match (self, target) {
+            (Value::Int(i), DataType::Float) => Some(Value::Float(i as f64)),
+            (value, target) if value.fits(target) => Some(value),
             _ => None,
         }
     }

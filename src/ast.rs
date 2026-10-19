@@ -8,6 +8,17 @@ pub enum Statement {
     Select(Select),
     CreateTable(CreateTable),
     DropTable(DropTable),
+    Insert(Insert),
+}
+
+/// `INSERT INTO table [(column, ...)] VALUES (expr, ...), ...`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Insert {
+    pub table: String,
+    /// `None` when there is no column list: each row then gives every Column,
+    /// in Schema order.
+    pub columns: Option<Vec<String>>,
+    pub rows: Vec<Vec<Expr>>,
 }
 
 /// `CREATE TABLE [IF NOT EXISTS] name (column, ...)`.

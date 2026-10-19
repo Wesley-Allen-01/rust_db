@@ -1,0 +1,8 @@
+# INSERT ... VALUES. Until SELECT ... FROM lands, rows show only through the
+# count each INSERT reports and the errors it gives.
+
+statement ok
+CREATE TABLE users (id INT NOT NULL, name TEXT, score FLOAT, active BOOL);
+
+statement count 1
+INSERT INTO users VALUES (1, 'ada', 9.5, true);

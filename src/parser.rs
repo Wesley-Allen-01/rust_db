@@ -4,7 +4,8 @@
 //! climbing (Pratt parsing). Hand-written per ADR-0001.
 
 use crate::ast::{
-    BinaryOp, ColumnDef, CreateTable, DropTable, Expr, Select, SelectItem, Statement, UnaryOp,
+    BinaryOp, ColumnDef, CreateTable, DropTable, Expr, Insert, Select, SelectItem, Statement,
+    UnaryOp,
 };
 use crate::error::{DbError, Result};
 use crate::lexer::{Keyword, Position, PositionedToken, Token, tokenize};
@@ -116,9 +117,12 @@ impl Parser {
         if self.eat_keyword(Keyword::Drop) {
             return Ok(Statement::DropTable(self.drop_table()?));
         }
+        if self.eat_keyword(Keyword::Insert) {
+            return Ok(Statement::Insert(self.insert()?));
+        }
         match self.peek() {
             // Statements whose slices have not landed yet.
-            Some(Token::Keyword(Keyword::Insert | Keyword::Update | Keyword::Delete)) => {
+            Some(Token::Keyword(Keyword::Update | Keyword::Delete)) => {
                 Err(DbError::NotYetSupported)
             }
             _ => Err(self.error("expected a statement")),
@@ -198,6 +202,43 @@ impl Parser {
         }
         let name = self.ident()?;
         Ok(DropTable { name, if_exists })
+    }
+
+    /// The part of an INSERT after the `INSERT` keyword.
+    fn insert(&mut self) -> Result<Insert> {
+        self.expect_keyword(Keyword::Into, "expected INTO")?;
+        let table = self.ident()?;
+        let columns = if self.eat(&Token::LParen) {
+            Some(self.list(Self::ident)?)
+        } else {
+            None
+        };
+        self.expect_keyword(Keyword::Values, "expected VALUES")?;
+        let mut rows = vec![self.values_row()?];
+        while self.eat(&Token::Comma) {
+            rows.push(self.values_row()?);
+        }
+        Ok(Insert {
+            table,
+            columns,
+            rows,
+        })
+    }
+
+    /// One parenthesised row of a VALUES list.
+    fn values_row(&mut self) -> Result<Vec<Expr>> {
+        self.expect(&Token::LParen, "expected (")?;
+        self.list(Self::expr)
+    }
+
+    /// One or more items separated by commas, then the closing `)`.
+    fn list<T>(&mut self, item: fn(&mut Self) -> Result<T>) -> Result<Vec<T>> {
+        let mut items = vec![item(self)?];
+        while self.eat(&Token::Comma) {
+            items.push(item(self)?);
+        }
+        self.expect(&Token::RParen, "expected , or )")?;
+        Ok(items)
     }
 
     fn select_item(&mut self) -> Result<SelectItem> {

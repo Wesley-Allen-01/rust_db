@@ -1,4 +1,4 @@
 # Statements whose slices have not landed yet are rejected.
 
 statement error not yet supported
-INSERT INTO users VALUES (1);
+UPDATE users SET id = 1;

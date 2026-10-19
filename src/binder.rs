@@ -4,7 +4,7 @@
 //! and every INT-to-FLOAT Coercion is an explicit `ToFloat`, so evaluation never has
 //! to look at types.
 
-use crate::ast::{BinaryOp, CreateTable, DropTable, Expr, SelectItem, Statement, UnaryOp};
+use crate::ast::{BinaryOp, CreateTable, DropTable, Expr, Insert, SelectItem, Statement, UnaryOp};
 use crate::database::Database;
 use crate::error::{DbError, Result};
 use crate::schema::{Column, ResultColumn, Schema};
@@ -15,6 +15,7 @@ pub enum BoundStatement {
     Select(BoundSelect),
     CreateTable(BoundCreateTable),
     DropTable(BoundDropTable),
+    Insert(BoundInsert),
     /// A Statement that `IF [NOT] EXISTS` turned into nothing. It still
     /// reports its command tag, as in Postgres.
     NoOp {
@@ -33,6 +34,16 @@ pub struct BoundCreateTable {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BoundDropTable {
     pub name: String,
+}
+
+/// An INSERT into a Table that exists. Each row holds one expression per
+/// Column, in Schema order, with NULL for Columns the column list left out.
+/// Each expression's Data Type fits its Column, allowing for the Coercion
+/// the Table applies.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoundInsert {
+    pub table: String,
+    pub rows: Vec<Vec<BoundExpr>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -82,6 +93,50 @@ pub fn bind(db: &Database, statement: Statement) -> Result<BoundStatement> {
         }
         Statement::CreateTable(create) => bind_create_table(db, create),
         Statement::DropTable(drop) => bind_drop_table(db, drop),
+        Statement::Insert(insert) => bind_insert(db, insert),
+    }
+}
+
+fn bind_insert(db: &Database, insert: Insert) -> Result<BoundStatement> {
+    let table = db.get(&insert.table)?;
+    let schema = table.schema();
+    let rows = insert
+        .rows
+        .into_iter()
+        .map(|row| bind_insert_row(schema, row))
+        .collect::<Result<_>>()?;
+    Ok(BoundStatement::Insert(BoundInsert {
+        table: table.name().to_string(),
+        rows,
+    }))
+}
+
+/// Binds one VALUES row into a full-width row in Schema order.
+fn bind_insert_row(schema: &Schema, row: Vec<Expr>) -> Result<Vec<BoundExpr>> {
+    if row.len() != schema.len() {
+        return Err(DbError::ArityMismatch {
+            expected: schema.len(),
+            got: row.len(),
+        });
+    }
+    row.into_iter()
+        .zip(schema.columns())
+        .map(|(expr, column)| bind_insert_value(column, expr))
+        .collect()
+}
+
+/// Binds a value for `column`, checking its Data Type. NOT NULL is left to
+/// the Table, since an expression such as `NULL + 1` is only known to be NULL
+/// once evaluated.
+fn bind_insert_value(column: &Column, expr: Expr) -> Result<BoundExpr> {
+    let (expr, ty) = bind_expr(expr)?;
+    match ty {
+        Some(ty) if !ty.coerces_to(column.data_type()) => Err(DbError::TypeMismatch {
+            column: column.name().to_string(),
+            expected: column.data_type(),
+            got: Some(ty),
+        }),
+        _ => Ok(expr),
     }
 }
 

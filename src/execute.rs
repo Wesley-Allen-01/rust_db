@@ -1,8 +1,9 @@
 //! The library's entry point for SQL: one Statement in, an Output or an error out.
 
-use crate::binder::{BoundSelect, BoundStatement, bind};
+use crate::binder::{BoundInsert, BoundSelect, BoundStatement, bind};
 use crate::database::Database;
 use crate::error::Result;
+use crate::eval::eval;
 use crate::parser::parse;
 use crate::planner::plan_select;
 use crate::schema::ResultColumn;
@@ -60,8 +61,25 @@ pub fn execute(db: &mut Database, sql: &str) -> Result<Output> {
             db.drop_table(&drop.name)?;
             Ok(done("DROP TABLE"))
         }
+        BoundStatement::Insert(insert) => run_insert(db, insert),
         BoundStatement::NoOp { tag } => Ok(done(tag)),
     }
+}
+
+/// Evaluates every row before inserting any, and the Table inserts them all
+/// or none, so a failing row leaves the Table unchanged.
+fn run_insert(db: &mut Database, insert: BoundInsert) -> Result<Output> {
+    let rows = insert
+        .rows
+        .iter()
+        .map(|row| row.iter().map(eval).collect::<Result<Vec<Value>>>())
+        .collect::<Result<Vec<_>>>()?;
+    let count = db.get_mut(&insert.table)?.insert_all(rows)?.len() as u64;
+    Ok(Output::Done {
+        // The 0 is the OID psql reports; it is always 0 in modern Postgres.
+        tag: format!("INSERT 0 {count}"),
+        rows_affected: count,
+    })
 }
 
 /// The Output of a Statement that changes no Rows.
