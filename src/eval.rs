@@ -21,22 +21,84 @@ pub fn eval(expr: &BoundExpr, row: &[Value]) -> Result<Value> {
         BoundExpr::Binary { op, left, right } => {
             binary(*op, eval(left, row)?, eval(right, row)?)
         }
+        BoundExpr::IsNull { operand, negated } => {
+            let is_null = eval(operand, row)?.is_null();
+            Ok(Value::Bool(is_null != *negated))
+        }
     }
 }
 
 fn unary(op: UnaryOp, value: Value) -> Result<Value> {
     match (op, value) {
         (_, Value::Null) => Ok(Value::Null),
-        (UnaryOp::Neg, Value::Int(i)) => i.checked_neg().map(Value::Int).ok_or(DbError::IntegerOverflow),
+        (UnaryOp::Neg, Value::Int(i)) => {
+            i.checked_neg().map(Value::Int).ok_or(DbError::IntegerOverflow)
+        }
         (UnaryOp::Neg, Value::Float(x)) => Ok(Value::Float(-x)),
+        (UnaryOp::Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
         (op, value) => unreachable!("binder let through {op} {value:?}"),
     }
 }
 
 fn binary(op: BinaryOp, left: Value, right: Value) -> Result<Value> {
-    if left.is_null() || right.is_null() {
-        return Ok(Value::Null);
+    match op {
+        // AND and OR can be decided despite a NULL operand, so they come first.
+        BinaryOp::And => Ok(and(left.as_bool(), right.as_bool())),
+        BinaryOp::Or => Ok(or(left.as_bool(), right.as_bool())),
+        _ if left.is_null() || right.is_null() => Ok(Value::Null),
+        _ if op.is_comparison() => Ok(Value::Bool(compare(op, &left, &right))),
+        BinaryOp::Concat => Ok(concat(left, right)),
+        _ => arithmetic(op, left, right),
     }
+}
+
+/// Three-valued AND, where `None` is NULL (unknown): FALSE wins over unknown.
+fn and(left: Option<bool>, right: Option<bool>) -> Value {
+    match (left, right) {
+        (Some(false), _) | (_, Some(false)) => Value::Bool(false),
+        (Some(true), Some(true)) => Value::Bool(true),
+        _ => Value::Null,
+    }
+}
+
+/// Three-valued OR, where `None` is NULL (unknown): TRUE wins over unknown.
+fn or(left: Option<bool>, right: Option<bool>) -> Value {
+    match (left, right) {
+        (Some(true), _) | (_, Some(true)) => Value::Bool(true),
+        (Some(false), Some(false)) => Value::Bool(false),
+        _ => Value::Null,
+    }
+}
+
+/// SQL comparison of two non-NULL Values of the same Data Type.
+fn compare(op: BinaryOp, left: &Value, right: &Value) -> bool {
+    let ordering = match (left, right) {
+        (Value::Int(a), Value::Int(b)) => a.cmp(b),
+        // total_cmp only as a fallback, for NaN; it would put -0.0 below 0.0.
+        (Value::Float(a), Value::Float(b)) => a.partial_cmp(b).unwrap_or(a.total_cmp(b)),
+        (Value::Text(a), Value::Text(b)) => a.cmp(b),
+        (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
+        _ => unreachable!("binder let through {left:?} {op} {right:?}"),
+    };
+    match op {
+        BinaryOp::Eq => ordering.is_eq(),
+        BinaryOp::NotEq => ordering.is_ne(),
+        BinaryOp::Lt => ordering.is_lt(),
+        BinaryOp::LtEq => ordering.is_le(),
+        BinaryOp::Gt => ordering.is_gt(),
+        BinaryOp::GtEq => ordering.is_ge(),
+        _ => unreachable!("{op} is not a comparison"),
+    }
+}
+
+fn concat(left: Value, right: Value) -> Value {
+    match (left, right) {
+        (Value::Text(a), Value::Text(b)) => Value::Text(a + &b),
+        (left, right) => unreachable!("binder let through {left:?} || {right:?}"),
+    }
+}
+
+fn arithmetic(op: BinaryOp, left: Value, right: Value) -> Result<Value> {
     match (left, right) {
         (Value::Int(a), Value::Int(b)) => int_arithmetic(op, a, b).map(Value::Int),
         (Value::Float(a), Value::Float(b)) => float_arithmetic(op, a, b).map(Value::Float),

@@ -65,6 +65,20 @@ pub enum BinaryOp {
     Concat,
 }
 
+impl BinaryOp {
+    pub fn is_comparison(self) -> bool {
+        matches!(
+            self,
+            BinaryOp::Eq
+                | BinaryOp::NotEq
+                | BinaryOp::Lt
+                | BinaryOp::LtEq
+                | BinaryOp::Gt
+                | BinaryOp::GtEq
+        )
+    }
+}
+
 impl fmt::Display for UnaryOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {

@@ -1,0 +1,63 @@
+# Three-valued logic: every row of the AND, OR and NOT truth tables.
+
+query BBB
+SELECT TRUE AND TRUE, TRUE AND FALSE, TRUE AND NULL
+----
+true false NULL
+
+query BBB
+SELECT FALSE AND TRUE, FALSE AND FALSE, FALSE AND NULL
+----
+false false false
+
+query BBB
+SELECT NULL AND TRUE, NULL AND FALSE, NULL AND NULL
+----
+NULL false NULL
+
+query BBB
+SELECT TRUE OR TRUE, TRUE OR FALSE, TRUE OR NULL
+----
+true true true
+
+query BBB
+SELECT FALSE OR TRUE, FALSE OR FALSE, FALSE OR NULL
+----
+true false NULL
+
+query BBB
+SELECT NULL OR TRUE, NULL OR FALSE, NULL OR NULL
+----
+true NULL NULL
+
+query BBB
+SELECT NOT TRUE, NOT FALSE, NOT NULL
+----
+false true NULL
+
+# AND binds tighter than OR; NOT tighter than AND.
+query BB
+SELECT TRUE OR TRUE AND FALSE, NOT FALSE AND FALSE
+----
+true false
+
+# NOT binds looser than comparison: NOT (1 = 2).
+query B
+SELECT NOT 1 = 2
+----
+true
+
+# An unknown comparison feeds into logic as NULL.
+query BB
+SELECT 1 = NULL OR 1 = 1, 1 = NULL AND 1 = 2
+----
+true false
+
+statement error operator AND cannot be applied to INT and BOOL
+SELECT 1 AND TRUE
+
+statement error operator OR cannot be applied to BOOL and TEXT
+SELECT TRUE OR 'yes'
+
+statement error operator NOT cannot be applied to INT
+SELECT NOT 1

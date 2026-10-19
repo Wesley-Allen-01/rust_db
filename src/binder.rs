@@ -41,6 +41,11 @@ pub enum BoundExpr {
         left: Box<BoundExpr>,
         right: Box<BoundExpr>,
     },
+    /// `IS NULL`, or `IS NOT NULL` when `negated`.
+    IsNull {
+        operand: Box<BoundExpr>,
+        negated: bool,
+    },
     /// The INT-to-FLOAT Coercion.
     ToFloat(Box<BoundExpr>),
 }
@@ -87,24 +92,30 @@ fn bind_expr(expr: Expr) -> Result<(BoundExpr, ExprType)> {
         Expr::Column(name) => Err(DbError::NoSuchColumn { name }),
         Expr::Unary { op, operand } => bind_unary(op, *operand),
         Expr::Binary { op, left, right } => bind_binary(op, *left, *right),
-        _ => Err(DbError::NotYetSupported),
+        Expr::IsNull { operand, negated } => {
+            // Any Data Type can be tested for NULL.
+            let (operand, _) = bind_expr(*operand)?;
+            let bound = BoundExpr::IsNull {
+                operand: Box::new(operand),
+                negated,
+            };
+            Ok((bound, Some(DataType::Bool)))
+        }
     }
 }
 
 fn bind_unary(op: UnaryOp, operand: Expr) -> Result<(BoundExpr, ExprType)> {
     let (operand, ty) = bind_expr(operand)?;
-    let accepted = match op {
-        UnaryOp::Neg => is_numeric(ty),
-        UnaryOp::Not => return Err(DbError::NotYetSupported),
+    let result_ty = match op {
+        UnaryOp::Neg if is_numeric(ty) => ty,
+        UnaryOp::Not if is(ty, DataType::Bool) => Some(DataType::Bool),
+        _ => return Err(DbError::UnaryTypeMismatch { op, operand: ty }),
     };
-    if !accepted {
-        return Err(DbError::UnaryTypeMismatch { op, operand: ty });
-    }
     let bound = BoundExpr::Unary {
         op,
         operand: Box::new(operand),
     };
-    Ok((bound, ty))
+    Ok((bound, result_ty))
 }
 
 fn bind_binary(op: BinaryOp, left: Expr, right: Expr) -> Result<(BoundExpr, ExprType)> {
@@ -115,10 +126,24 @@ fn bind_binary(op: BinaryOp, left: Expr, right: Expr) -> Result<(BoundExpr, Expr
         left: left_ty,
         right: right_ty,
     };
-    if !is_numeric(left_ty) || !is_numeric(right_ty) {
-        return Err(mismatch);
-    }
-    let (left, right, ty) = unify((left, left_ty), (right, right_ty)).ok_or(mismatch)?;
+    let both = |data_type| is(left_ty, data_type) && is(right_ty, data_type);
+
+    let (left, right, ty) = match op {
+        BinaryOp::And | BinaryOp::Or if both(DataType::Bool) => {
+            (left, right, Some(DataType::Bool))
+        }
+        BinaryOp::Concat if both(DataType::Text) => (left, right, Some(DataType::Text)),
+        BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod
+            if is_numeric(left_ty) && is_numeric(right_ty) =>
+        {
+            unify((left, left_ty), (right, right_ty)).ok_or(mismatch)?
+        }
+        op if op.is_comparison() => {
+            let (left, right, _) = unify((left, left_ty), (right, right_ty)).ok_or(mismatch)?;
+            (left, right, Some(DataType::Bool))
+        }
+        _ => return Err(mismatch),
+    };
     let bound = BoundExpr::Binary {
         op,
         left: Box::new(left),
@@ -145,6 +170,12 @@ fn unify(
 
 fn to_float(expr: BoundExpr) -> BoundExpr {
     BoundExpr::ToFloat(Box::new(expr))
+}
+
+/// Whether an operand of type `ty` can stand where `expected` is needed.
+/// NULL can stand anywhere.
+fn is(ty: ExprType, expected: DataType) -> bool {
+    ty.is_none_or(|t| t == expected)
 }
 
 fn is_numeric(ty: ExprType) -> bool {
