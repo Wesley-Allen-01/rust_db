@@ -31,6 +31,8 @@ pub enum DbError {
     TableAlreadyExists {
         name: String,
     },
+
+    NotYetSupported,
 }
 
 impl fmt::Display for DbError {
@@ -70,6 +72,10 @@ impl fmt::Display for DbError {
 
             DbError::TableAlreadyExists { name } => {
                 write!(f, "table `{name}` already exists")
+            }
+
+            DbError::NotYetSupported => {
+                write!(f, "not yet supported")
             }
         }
     }

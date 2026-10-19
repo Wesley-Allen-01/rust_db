@@ -54,6 +54,10 @@ _Avoid_: id, rowid, key, primary key
 One complete SQL command, such as a SELECT or an INSERT. A Statement either takes full effect or none at all.
 _Avoid_: command, query (when not a SELECT)
 
+**Result Set**:
+The Columns and Rows a Statement such as a SELECT returns. Its Rows need not belong to any Table.
+_Avoid_: result, output, rowset
+
 **Plan**:
 The tree of Operators that a Statement is turned into before it runs.
 _Avoid_: query plan, execution plan
