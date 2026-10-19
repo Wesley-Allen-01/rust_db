@@ -5,12 +5,8 @@ use crate::value::Value;
 
 /// Renders Rows like psql: centred headers, a dashed rule, then a row-count footer.
 pub fn render_table(result: &ResultSet) -> String {
-    let cells: Vec<Vec<String>> = result
-        .rows
-        .iter()
-        .map(|row| row.iter().map(|value| value.to_string()).collect())
-        .collect();
-    let widths = column_widths(&result.columns, &cells);
+    let text_rows = result.text_rows();
+    let widths = column_widths(&result.columns, &text_rows);
 
     let mut out = String::new();
     let header: Vec<String> = result
@@ -25,10 +21,10 @@ pub fn render_table(result: &ResultSet) -> String {
     out.push_str(&rule.join("+"));
     out.push('\n');
 
-    for (row, cell_texts) in result.rows.iter().zip(&cells) {
+    for (row, texts) in result.rows.iter().zip(&text_rows) {
         let padded: Vec<String> = row
             .iter()
-            .zip(cell_texts)
+            .zip(texts)
             .zip(&widths)
             .map(|((value, text), &width)| pad(value, text, width))
             .collect();
@@ -37,7 +33,7 @@ pub fn render_table(result: &ResultSet) -> String {
         out.push('\n');
     }
 
-    out.push_str(&footer(cells.len()));
+    out.push_str(&footer(text_rows.len()));
     out
 }
 
@@ -49,17 +45,17 @@ fn pad(value: &Value, text: &str, width: usize) -> String {
     }
 }
 
-fn column_widths(columns: &[String], cells: &[Vec<String>]) -> Vec<usize> {
+fn column_widths(columns: &[String], text_rows: &[Vec<String>]) -> Vec<usize> {
     columns
         .iter()
         .enumerate()
         .map(|(i, name)| {
-            let widest_cell = cells
+            let widest_text = text_rows
                 .iter()
                 .map(|row| row[i].chars().count())
                 .max()
                 .unwrap_or(0);
-            name.chars().count().max(widest_cell)
+            name.chars().count().max(widest_text)
         })
         .collect()
 }

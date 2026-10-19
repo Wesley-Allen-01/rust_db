@@ -14,10 +14,23 @@ pub enum Output {
 }
 
 /// Rows returned by a Statement, with the names of their Columns.
+///
+/// Rows are plain `Vec<Value>` rather than `table::Row`, because a result Row
+/// (e.g. a projection or an aggregate) need not belong to any Table.
 #[derive(Debug, Clone)]
 pub struct ResultSet {
     pub columns: Vec<String>,
     pub rows: Vec<Vec<Value>>,
+}
+
+impl ResultSet {
+    /// Each Row's Values as display text.
+    pub fn text_rows(&self) -> Vec<Vec<String>> {
+        self.rows
+            .iter()
+            .map(|row| row.iter().map(|value| value.to_string()).collect())
+            .collect()
+    }
 }
 
 /// Runs one SQL Statement against the Database.

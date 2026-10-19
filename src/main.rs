@@ -2,7 +2,7 @@
 
 use rust_db::database::Database;
 use rust_db::execute::{Output, execute};
-use rust_db::repl::input::StatementBuffer;
+use rust_db::repl::input::{Input, InputBuffer};
 use rust_db::repl::meta::{MetaOutcome, run_meta};
 use rust_db::repl::render::render_table;
 use rustyline::DefaultEditor;
@@ -14,7 +14,7 @@ const CONTINUATION_PROMPT: &str = "rust_db-> ";
 fn main() -> rustyline::Result<()> {
     let mut editor = DefaultEditor::new()?;
     let mut db = Database::new();
-    let mut buffer = StatementBuffer::new();
+    let mut buffer = InputBuffer::new();
 
     loop {
         let prompt = if buffer.is_empty() {
@@ -27,7 +27,7 @@ fn main() -> rustyline::Result<()> {
             Ok(line) => line,
             // Ctrl-C abandons the unfinished Statement, like psql.
             Err(ReadlineError::Interrupted) => {
-                buffer = StatementBuffer::new();
+                buffer.clear();
                 continue;
             }
             Err(ReadlineError::Eof) => break,
@@ -37,22 +37,18 @@ fn main() -> rustyline::Result<()> {
             editor.add_history_entry(line.as_str())?;
         }
 
-        // Meta Commands only count at the start of a Statement.
-        if buffer.is_empty() && line.trim_start().starts_with('\\') {
-            match run_meta(&db, &line) {
+        match buffer.push(&line) {
+            None => {}
+            Some(Input::Meta(command)) => match run_meta(&db, &command) {
                 Ok(MetaOutcome::Quit) => break,
                 Ok(MetaOutcome::Print(text)) => print!("{text}"),
                 Err(message) => eprintln!("ERROR: {message}"),
-            }
-            continue;
-        }
-
-        if let Some(sql) = buffer.push(&line) {
-            match execute(&mut db, &sql) {
+            },
+            Some(Input::Statement(sql)) => match execute(&mut db, &sql) {
                 Ok(Output::Done) => println!("OK"),
                 Ok(Output::Rows(result)) => print!("{}", render_table(&result)),
                 Err(err) => eprintln!("ERROR: {err}"),
-            }
+            },
         }
     }
 

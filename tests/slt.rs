@@ -22,12 +22,21 @@ impl sqllogictest::DB for Engine {
                 // Column types are not checked yet, so report every column as Any.
                 types: vec![DefaultColumnType::Any; result.columns.len()],
                 rows: result
-                    .rows
-                    .iter()
-                    .map(|row| row.iter().map(|value| value.to_string()).collect())
+                    .text_rows()
+                    .into_iter()
+                    .map(|row| row.into_iter().map(slt_text).collect())
                     .collect(),
             }),
         }
+    }
+}
+
+/// sqllogictest can't express an empty string in a results block, so it spells it `(empty)`.
+fn slt_text(text: String) -> String {
+    if text.is_empty() {
+        "(empty)".to_string()
+    } else {
+        text
     }
 }
 
@@ -47,7 +56,7 @@ fn slt_files(dir: &Path) -> Vec<PathBuf> {
 
 #[test]
 fn slt_files_pass() {
-    let files = slt_files(Path::new("tests/slt"));
+    let files = slt_files(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/slt"));
     assert!(!files.is_empty(), "no .slt files found under tests/slt");
 
     for file in files {

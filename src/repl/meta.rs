@@ -14,15 +14,14 @@ pub enum MetaOutcome {
 
 /// Runs one Meta Command line (e.g. `\dt`). An error is a message to print.
 pub fn run_meta(db: &Database, line: &str) -> Result<MetaOutcome, String> {
-    let mut words = line.split_whitespace();
-    let command = words.next().unwrap_or("");
-    let argument = words.next();
+    let words: Vec<&str> = line.split_whitespace().collect();
 
-    match (command, argument) {
-        ("\\q", None) => Ok(MetaOutcome::Quit),
-        ("\\dt", None) => Ok(MetaOutcome::Print(list_tables(db))),
-        ("\\d", Some(table)) => describe_table(db, table).map(MetaOutcome::Print),
-        ("\\d", None) => Err("usage: \\d <table>".to_string()),
+    match words.as_slice() {
+        ["\\q"] => Ok(MetaOutcome::Quit),
+        ["\\dt"] => Ok(MetaOutcome::Print(list_tables(db))),
+        ["\\d", table] => describe_table(db, table).map(MetaOutcome::Print),
+        [command @ ("\\q" | "\\dt"), ..] => Err(format!("{command} takes no arguments")),
+        ["\\d", ..] => Err("usage: \\d <table>".to_string()),
         _ => Err(format!("unknown meta command: {}", line.trim())),
     }
 }
@@ -55,14 +54,14 @@ fn describe_table(db: &Database, name: &str) -> Result<String, String> {
             ]
         })
         .collect();
-    let columns = ResultSet {
+    let listing = ResultSet {
         columns: vec!["Column".to_string(), "Type".to_string()],
         rows,
     };
     Ok(format!(
         "Table \"{}\"\n{}",
         table.name(),
-        render_table(&columns)
+        render_table(&listing)
     ))
 }
 
@@ -147,10 +146,24 @@ mod tests {
     }
 
     #[test]
-    fn describe_without_a_table_name_is_an_error() {
+    fn describe_without_exactly_one_table_name_is_an_error() {
+        for line in ["\\d", "\\d users orders"] {
+            assert_eq!(
+                run_meta(&db_with_tables(), line),
+                Err("usage: \\d <table>".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn commands_without_arguments_reject_extra_words() {
         assert_eq!(
-            run_meta(&db_with_tables(), "\\d"),
-            Err("usage: \\d <table>".to_string())
+            run_meta(&db_with_tables(), "\\dt users"),
+            Err("\\dt takes no arguments".to_string())
+        );
+        assert_eq!(
+            run_meta(&db_with_tables(), "\\q now"),
+            Err("\\q takes no arguments".to_string())
         );
     }
 }
