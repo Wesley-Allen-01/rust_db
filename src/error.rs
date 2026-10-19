@@ -73,6 +73,11 @@ pub enum DbError {
     DivisionByZero,
 
     NotYetSupported,
+
+    /// An ORDER BY name that matches several different output Columns.
+    AmbiguousColumn {
+        name: String,
+    },
 }
 
 /// A Data Type for an error message, where `None` means NULL.
@@ -153,6 +158,10 @@ impl fmt::Display for DbError {
 
             DbError::NotYetSupported => {
                 write!(f, "not yet supported")
+            }
+
+            DbError::AmbiguousColumn { name } => {
+                write!(f, "column name `{name}` is ambiguous")
             }
         }
     }

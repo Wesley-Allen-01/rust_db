@@ -1,0 +1,15 @@
+# ORDER BY sorts a SELECT's Rows. Results are compared in order.
+
+statement ok
+CREATE TABLE people (id INT, name TEXT, score FLOAT);
+
+statement ok
+INSERT INTO people VALUES (1, 'carol', 7.5), (2, 'ada', 9), (3, 'bob', 7.5);
+
+# ASC is the default.
+query IT
+SELECT id, name FROM people ORDER BY name;
+----
+2 ada
+3 bob
+1 carol

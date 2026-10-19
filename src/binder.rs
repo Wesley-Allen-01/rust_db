@@ -6,8 +6,8 @@
 //! the Table instead, which does it for every Row it stores.
 
 use crate::ast::{
-    BinaryOp, CreateTable, Delete, DropTable, Expr, Insert, Select, SelectItem, Statement, UnaryOp,
-    Update,
+    BinaryOp, CreateTable, Delete, DropTable, Expr, Insert, OrderByItem, Select, SelectItem,
+    Statement, UnaryOp, Update,
 };
 use crate::database::Database;
 use crate::error::{DbError, Result};
@@ -65,6 +65,16 @@ pub struct BoundSelect {
     pub exprs: Vec<BoundExpr>,
     /// One per expression, in the same order.
     pub columns: Vec<ResultColumn>,
+    /// The ORDER BY keys, most significant first. Each reads the same Rows
+    /// as the SELECT list, not its output.
+    pub order_by: Vec<SortKey>,
+}
+
+/// One ORDER BY key. NULLs sort last for ASC and first for DESC, as in Postgres.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SortKey {
+    pub expr: BoundExpr,
+    pub descending: bool,
 }
 
 /// An UPDATE of a Table that exists. Every expression, WHERE included, reads
@@ -292,12 +302,63 @@ fn bind_select(db: &Database, select: Select) -> Result<BoundStatement> {
             }
         }
     }
+    let order_by = select
+        .order_by
+        .into_iter()
+        .map(|item| bind_sort_key(item, &exprs, &columns, scope))
+        .collect::<Result<_>>()?;
     Ok(BoundStatement::Select(BoundSelect {
         from: table.map(|table| table.name().to_string()),
         predicate: bind_predicate(select.predicate, scope)?,
         exprs,
         columns,
+        order_by,
     }))
+}
+
+/// A bare name that is an output Column's name sorts by that Column's
+/// expression, so an alias works as a key. Any other key is an expression
+/// over the input Columns, as in Postgres.
+fn bind_sort_key(
+    item: OrderByItem,
+    exprs: &[BoundExpr],
+    columns: &[ResultColumn],
+    scope: Option<&Schema>,
+) -> Result<SortKey> {
+    let expr = match &item.expr {
+        Expr::Column(name) => match output_expr(name, exprs, columns)? {
+            Some(expr) => expr,
+            None => bind_expr(item.expr, scope)?.0,
+        },
+        _ => bind_expr(item.expr, scope)?.0,
+    };
+    Ok(SortKey {
+        expr,
+        descending: item.descending,
+    })
+}
+
+/// The expression of the output Column called `name`, if there is one.
+/// Several such Columns are fine only if they compute the same thing.
+fn output_expr(
+    name: &str,
+    exprs: &[BoundExpr],
+    columns: &[ResultColumn],
+) -> Result<Option<BoundExpr>> {
+    let mut matches = columns
+        .iter()
+        .zip(exprs)
+        .filter(|(column, _)| column.name.eq_ignore_ascii_case(name))
+        .map(|(_, expr)| expr);
+    let Some(first) = matches.next() else {
+        return Ok(None);
+    };
+    if matches.any(|other| other != first) {
+        return Err(DbError::AmbiguousColumn {
+            name: name.to_string(),
+        });
+    }
+    Ok(Some(first.clone()))
 }
 
 /// `*` expands to every Column of the FROM Table, in Schema order.

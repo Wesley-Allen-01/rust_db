@@ -1,11 +1,12 @@
 //! The Operators a Plan is built from (ADR-0002). Each one yields Rows on
 //! demand, pulling from its children.
 
-use crate::binder::BoundExpr;
+use crate::binder::{BoundExpr, SortKey};
 use crate::error::Result;
-use crate::eval::eval;
+use crate::eval::{eval, order};
 use crate::table::{Row, RowId, Table};
 use crate::value::Value;
+use std::cmp::Ordering;
 
 /// A Row as it flows through a Plan.
 ///
@@ -121,6 +122,80 @@ impl Operator for Project<'_> {
             row_id: row.row_id,
             values,
         }))
+    }
+}
+
+/// Yields its child's Rows ordered by the sort keys. It reads every Row
+/// before yielding the first. Rows that tie on every key keep their input
+/// order.
+pub struct Sort<'a> {
+    child: Box<dyn Operator + 'a>,
+    keys: Vec<SortKey>,
+    /// `None` until the child has been read and sorted.
+    sorted: Option<std::vec::IntoIter<PlanRow>>,
+}
+
+impl<'a> Sort<'a> {
+    pub fn new(child: Box<dyn Operator + 'a>, keys: Vec<SortKey>) -> Self {
+        Sort {
+            child,
+            keys,
+            sorted: None,
+        }
+    }
+
+    /// Reads every Row of the child and sorts them. Each Row's key Values
+    /// are computed once, up front, so an error in a key fails the Sort.
+    fn sort_child(&mut self) -> Result<std::vec::IntoIter<PlanRow>> {
+        let mut keyed = Vec::new();
+        while let Some(row) = self.child.next()? {
+            let key_values = self
+                .keys
+                .iter()
+                .map(|key| eval(&key.expr, &row.values))
+                .collect::<Result<Vec<Value>>>()?;
+            keyed.push((key_values, row));
+        }
+        // `sort_by` is stable, which keeps ties in input order.
+        keyed.sort_by(|(a, _), (b, _)| self.compare_keys(a, b));
+        let rows: Vec<PlanRow> = keyed.into_iter().map(|(_, row)| row).collect();
+        Ok(rows.into_iter())
+    }
+
+    fn compare_keys(&self, a: &[Value], b: &[Value]) -> Ordering {
+        self.keys
+            .iter()
+            .zip(a.iter().zip(b))
+            .map(|(key, (a, b))| {
+                let ordering = nulls_last(a, b);
+                if key.descending {
+                    ordering.reverse()
+                } else {
+                    ordering
+                }
+            })
+            .find(|ordering| ordering.is_ne())
+            .unwrap_or(Ordering::Equal)
+    }
+}
+
+/// Ascending order with NULL after every Value. Reversed for DESC, this puts
+/// NULLs first, as Postgres does.
+fn nulls_last(a: &Value, b: &Value) -> Ordering {
+    match (a, b) {
+        (Value::Null, Value::Null) => Ordering::Equal,
+        (Value::Null, _) => Ordering::Greater,
+        (_, Value::Null) => Ordering::Less,
+        (a, b) => order(a, b),
+    }
+}
+
+impl Operator for Sort<'_> {
+    fn next(&mut self) -> Result<Option<PlanRow>> {
+        if self.sorted.is_none() {
+            self.sorted = Some(self.sort_child()?);
+        }
+        Ok(self.sorted.as_mut().and_then(Iterator::next))
     }
 }
 

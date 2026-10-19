@@ -1,13 +1,13 @@
 //! Turns a bound Statement into a Plan: a tree of Operators (ADR-0002).
 
-use crate::binder::{BoundExpr, BoundSelect};
+use crate::binder::{BoundExpr, BoundSelect, SortKey};
 use crate::database::Database;
 use crate::error::Result;
-use crate::operator::{Filter, Operator, Project, Scan, SingleRow};
+use crate::operator::{Filter, Operator, Project, Scan, SingleRow, Sort};
 use crate::table::Table;
 
-/// Builds `Project(Filter?(Scan | SingleRow))`. Operators that work on whole
-/// input Rows, such as Sort, go between the Filter and the Project.
+/// Builds `Project(Sort?(Filter?(Scan | SingleRow)))`. Sort goes below the
+/// Project because its keys read input Rows, not the SELECT list's output.
 pub fn plan_select<'a>(db: &'a Database, select: BoundSelect) -> Result<Box<dyn Operator + 'a>> {
     let rows = match &select.from {
         // The binder has checked the name; `get` checks it again as a guard.
@@ -15,6 +15,7 @@ pub fn plan_select<'a>(db: &'a Database, select: BoundSelect) -> Result<Box<dyn 
         // Without FROM, the SELECT list is computed once, over a single empty Row.
         None => with_filter(Box::new(SingleRow::new()), select.predicate),
     };
+    let rows = with_sort(rows, select.order_by);
     Ok(Box::new(Project::new(rows, select.exprs)))
 }
 
@@ -34,6 +35,14 @@ fn with_filter<'a>(
     match predicate {
         Some(predicate) => Box::new(Filter::new(child, predicate)),
         None => child,
+    }
+}
+
+fn with_sort<'a>(child: Box<dyn Operator + 'a>, keys: Vec<SortKey>) -> Box<dyn Operator + 'a> {
+    if keys.is_empty() {
+        child
+    } else {
+        Box::new(Sort::new(child, keys))
     }
 }
 
