@@ -9,6 +9,24 @@ pub enum Token {
     /// An unquoted identifier, folded to lowercase because names are
     /// case-insensitive.
     Ident(String),
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    Eq,
+    NotEq,
+    Lt,
+    LtEq,
+    Gt,
+    GtEq,
+    /// `||`, text concatenation.
+    Concat,
+    LParen,
+    RParen,
+    Comma,
+    Semicolon,
+    Dot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,7 +161,11 @@ impl Lexer {
                 continue;
             }
             let pos = self.pos();
-            let token = self.word();
+            let token = if c.is_alphabetic() || c == '_' {
+                self.word()
+            } else {
+                self.symbol(c)
+            };
             out.push(Spanned { token, pos });
         }
         Ok(out)
@@ -158,6 +180,40 @@ impl Lexer {
         match Keyword::from_word(&word) {
             Some(keyword) => Token::Keyword(keyword),
             None => Token::Ident(word.to_lowercase()),
+        }
+    }
+
+    fn symbol(&mut self, c: char) -> Token {
+        self.bump();
+        match c {
+            '+' => Token::Plus,
+            '-' => Token::Minus,
+            '*' => Token::Star,
+            '/' => Token::Slash,
+            '%' => Token::Percent,
+            '=' => Token::Eq,
+            '(' => Token::LParen,
+            ')' => Token::RParen,
+            ',' => Token::Comma,
+            ';' => Token::Semicolon,
+            '.' => Token::Dot,
+            '<' if self.eat('=') => Token::LtEq,
+            '<' if self.eat('>') => Token::NotEq,
+            '<' => Token::Lt,
+            '>' if self.eat('=') => Token::GtEq,
+            '>' => Token::Gt,
+            '|' if self.eat('|') => Token::Concat,
+            _ => unimplemented!(),
+        }
+    }
+
+    /// Consumes the next character if it is `expected`.
+    fn eat(&mut self, expected: char) -> bool {
+        if self.peek() == Some(expected) {
+            self.bump();
+            true
+        } else {
+            false
         }
     }
 
@@ -216,6 +272,37 @@ mod tests {
             As, Int, Float, Text, Bool,
         ];
         assert_eq!(tokens(sql), expected.map(Token::Keyword).to_vec());
+    }
+
+    #[test]
+    fn recognises_every_operator_and_punctuation() {
+        use Token::*;
+        assert_eq!(
+            tokens("+ - * / % = <> < <= > >= || ( ) , ; ."),
+            vec![
+                Plus, Minus, Star, Slash, Percent, Eq, NotEq, Lt, LtEq, Gt, GtEq, Concat, LParen,
+                RParen, Comma, Semicolon, Dot,
+            ]
+        );
+    }
+
+    #[test]
+    fn operators_need_no_surrounding_space() {
+        use Token::*;
+        assert_eq!(
+            tokens("a<=b<>c||d>e"),
+            vec![
+                Ident("a".into()),
+                LtEq,
+                Ident("b".into()),
+                NotEq,
+                Ident("c".into()),
+                Concat,
+                Ident("d".into()),
+                Gt,
+                Ident("e".into()),
+            ]
+        );
     }
 
     #[test]
