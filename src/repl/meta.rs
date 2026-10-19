@@ -3,7 +3,7 @@
 use crate::database::Database;
 use crate::execute::ResultSet;
 use crate::repl::render::render_table;
-use crate::value::Value;
+use crate::value::{DataType, Value};
 
 /// What the REPL should do after a Meta Command.
 #[derive(Debug, PartialEq)]
@@ -37,6 +37,7 @@ fn list_tables(db: &Database) -> String {
         .collect();
     render_table(&ResultSet {
         columns: vec!["Name".to_string()],
+        types: vec![DataType::Text],
         rows,
     })
 }
@@ -56,6 +57,7 @@ fn describe_table(db: &Database, name: &str) -> Result<String, String> {
         .collect();
     let listing = ResultSet {
         columns: vec!["Column".to_string(), "Type".to_string()],
+        types: vec![DataType::Text, DataType::Text],
         rows,
     };
     Ok(format!(
@@ -69,7 +71,7 @@ fn describe_table(db: &Database, name: &str) -> Result<String, String> {
 mod tests {
     use super::*;
     use crate::schema::{Column, Schema};
-    use crate::value::DataType;
+
 
     #[test]
     fn quit_command_quits() {

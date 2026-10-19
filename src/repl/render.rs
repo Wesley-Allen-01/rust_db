@@ -82,10 +82,13 @@ fn footer(count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::DataType;
 
     fn result(columns: &[&str], rows: Vec<Vec<Value>>) -> ResultSet {
         ResultSet {
             columns: columns.iter().map(|c| c.to_string()).collect(),
+            // Rendering goes by each Value, not the Column's Data Type.
+            types: vec![DataType::Text; columns.len()],
             rows,
         }
     }

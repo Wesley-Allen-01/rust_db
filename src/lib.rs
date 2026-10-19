@@ -1,7 +1,13 @@
+pub mod ast;
+pub mod binder;
 pub mod database;
 pub mod error;
+pub mod eval;
 pub mod execute;
 pub mod lexer;
+pub mod operator;
+pub mod parser;
+pub mod planner;
 pub mod repl;
 pub mod schema;
 pub mod table;

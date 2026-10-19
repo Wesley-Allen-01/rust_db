@@ -1,3 +1,4 @@
+use crate::lexer::Position;
 use crate::value::DataType;
 use std::fmt;
 
@@ -30,6 +31,12 @@ pub enum DbError {
 
     TableAlreadyExists {
         name: String,
+    },
+
+    /// The SQL text is malformed: a lexing or parsing error at `pos`.
+    Syntax {
+        pos: Position,
+        message: String,
     },
 
     NotYetSupported,
@@ -72,6 +79,10 @@ impl fmt::Display for DbError {
 
             DbError::TableAlreadyExists { name } => {
                 write!(f, "table `{name}` already exists")
+            }
+
+            DbError::Syntax { pos, message } => {
+                write!(f, "line {}, col {}: {message}", pos.line, pos.col)
             }
 
             DbError::NotYetSupported => {

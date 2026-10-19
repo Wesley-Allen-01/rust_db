@@ -1,0 +1,6 @@
+# Literals in SELECT without FROM.
+
+query I
+SELECT 1;
+----
+1
