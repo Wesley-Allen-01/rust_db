@@ -51,6 +51,24 @@ pub fn execute(db: &mut Database, sql: &str) -> Result<Output> {
     let statement = parse(sql)?;
     match bind(db, statement)? {
         BoundStatement::Select(select) => run_select(select).map(Output::Rows),
+        // The binder has checked the name; the Database checks it again as a guard.
+        BoundStatement::CreateTable(create) => {
+            db.create_table(create.name, create.schema)?;
+            Ok(done("CREATE TABLE"))
+        }
+        BoundStatement::DropTable(drop) => {
+            db.drop_table(&drop.name)?;
+            Ok(done("DROP TABLE"))
+        }
+        BoundStatement::NoOp { tag } => Ok(done(tag)),
+    }
+}
+
+/// The Output of a Statement that changes no Rows.
+fn done(tag: &str) -> Output {
+    Output::Done {
+        tag: tag.to_string(),
+        rows_affected: 0,
     }
 }
 
@@ -68,6 +86,21 @@ fn run_select(select: BoundSelect) -> Result<ResultSet> {
 mod tests {
     use super::*;
     use crate::value::DataType;
+
+    fn tag(db: &mut Database, sql: &str) -> String {
+        match execute(db, sql).unwrap() {
+            Output::Done { tag, .. } => tag,
+            other => panic!("expected Done, got {other:?}"),
+        }
+    }
+
+    // Here rather than in slt, which discards the tag.
+    #[test]
+    fn create_and_drop_report_psql_status_tags() {
+        let mut db = Database::new();
+        assert_eq!(tag(&mut db, "CREATE TABLE t (id INT)"), "CREATE TABLE");
+        assert_eq!(tag(&mut db, "DROP TABLE t"), "DROP TABLE");
+    }
 
     // Here rather than in slt, which can't check Column names.
     #[test]

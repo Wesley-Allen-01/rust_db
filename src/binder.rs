@@ -4,15 +4,35 @@
 //! and every INT-to-FLOAT Coercion is an explicit `ToFloat`, so evaluation never has
 //! to look at types.
 
-use crate::ast::{BinaryOp, Expr, SelectItem, Statement, UnaryOp};
+use crate::ast::{BinaryOp, CreateTable, DropTable, Expr, SelectItem, Statement, UnaryOp};
 use crate::database::Database;
 use crate::error::{DbError, Result};
-use crate::schema::ResultColumn;
+use crate::schema::{Column, ResultColumn, Schema};
 use crate::value::{DataType, Value};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BoundStatement {
     Select(BoundSelect),
+    CreateTable(BoundCreateTable),
+    DropTable(BoundDropTable),
+    /// A Statement that `IF [NOT] EXISTS` turned into nothing. It still
+    /// reports its command tag, as in Postgres.
+    NoOp {
+        tag: &'static str,
+    },
+}
+
+/// A CREATE TABLE whose name is free and whose Columns form a valid Schema.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoundCreateTable {
+    pub name: String,
+    pub schema: Schema,
+}
+
+/// A DROP TABLE of a Table that exists.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoundDropTable {
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -48,7 +68,7 @@ pub enum BoundExpr {
 /// An expression's Data Type, or `None` while it is only known to be NULL.
 type ExprType = Option<DataType>;
 
-pub fn bind(_db: &Database, statement: Statement) -> Result<BoundStatement> {
+pub fn bind(db: &Database, statement: Statement) -> Result<BoundStatement> {
     match statement {
         Statement::Select(select) => {
             let mut exprs = Vec::new();
@@ -60,6 +80,50 @@ pub fn bind(_db: &Database, statement: Statement) -> Result<BoundStatement> {
             }
             Ok(BoundStatement::Select(BoundSelect { exprs, columns }))
         }
+        Statement::CreateTable(create) => bind_create_table(db, create),
+        Statement::DropTable(drop) => bind_drop_table(db, drop),
+    }
+}
+
+/// The name is checked before the Schema, so `IF NOT EXISTS` on an existing
+/// Table skips the Statement without looking at its Columns, as in Postgres.
+fn bind_create_table(db: &Database, create: CreateTable) -> Result<BoundStatement> {
+    if db.contains_table(&create.name) {
+        if create.if_not_exists {
+            return Ok(BoundStatement::NoOp {
+                tag: "CREATE TABLE",
+            });
+        }
+        return Err(DbError::TableAlreadyExists { name: create.name });
+    }
+    let columns = create
+        .columns
+        .into_iter()
+        .map(|def| {
+            let column = Column::new(def.name, def.data_type);
+            if def.not_null {
+                column.not_null()
+            } else {
+                column
+            }
+        })
+        .collect();
+    Ok(BoundStatement::CreateTable(BoundCreateTable {
+        name: create.name,
+        schema: Schema::new(columns)?,
+    }))
+}
+
+fn bind_drop_table(db: &Database, drop: DropTable) -> Result<BoundStatement> {
+    // `get` gives the same NoSuchTable error that INSERT and SELECT will.
+    match db.get(&drop.name) {
+        Ok(table) => Ok(BoundStatement::DropTable(BoundDropTable {
+            name: table.name().to_string(),
+        })),
+        Err(DbError::NoSuchTable { .. }) if drop.if_exists => {
+            Ok(BoundStatement::NoOp { tag: "DROP TABLE" })
+        }
+        Err(err) => Err(err),
     }
 }
 
@@ -180,4 +244,60 @@ fn numeric_result(ty: ExprType) -> ExprType {
 
 fn is_numeric(ty: ExprType) -> bool {
     matches!(ty, None | Some(DataType::Int) | Some(DataType::Float))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::parse;
+
+    fn bind_sql(db: &Database, sql: &str) -> Result<BoundStatement> {
+        bind(db, parse(sql).unwrap())
+    }
+
+    fn db_with_users() -> Database {
+        let mut db = Database::new();
+        let schema = Schema::new(vec![Column::new("id", DataType::Int)]).unwrap();
+        db.create_table("users", schema).unwrap();
+        db
+    }
+
+    // Here rather than in slt, which can't tell the binder's errors from the
+    // Database's.
+    #[test]
+    fn binder_rejects_an_existing_table_name() {
+        assert_eq!(
+            bind_sql(&db_with_users(), "CREATE TABLE users (id INT)"),
+            Err(DbError::TableAlreadyExists {
+                name: "users".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn binder_rejects_dropping_an_unknown_table() {
+        assert_eq!(
+            bind_sql(&Database::new(), "DROP TABLE users"),
+            Err(DbError::NoSuchTable {
+                name: "users".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn if_exists_variants_bind_to_a_no_op_with_their_tag() {
+        assert_eq!(
+            bind_sql(
+                &db_with_users(),
+                "CREATE TABLE IF NOT EXISTS users (id INT)"
+            ),
+            Ok(BoundStatement::NoOp {
+                tag: "CREATE TABLE"
+            })
+        );
+        assert_eq!(
+            bind_sql(&Database::new(), "DROP TABLE IF EXISTS users"),
+            Ok(BoundStatement::NoOp { tag: "DROP TABLE" })
+        );
+    }
 }

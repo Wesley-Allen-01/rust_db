@@ -22,6 +22,7 @@ impl ResultColumn {
 pub struct Column {
     name: String,
     data_type: DataType,
+    not_null: bool,
 }
 
 impl Column {
@@ -29,7 +30,18 @@ impl Column {
         Column {
             name: name.into(),
             data_type,
+            not_null: false,
         }
+    }
+
+    /// Adds the NOT NULL Constraint. Columns are nullable by default.
+    pub fn not_null(mut self) -> Self {
+        self.not_null = true;
+        self
+    }
+
+    pub fn is_not_null(&self) -> bool {
+        self.not_null
     }
 
     pub fn name(&self) -> &str {
@@ -111,6 +123,11 @@ impl Schema {
         }
 
         for (col, val) in self.columns.iter().zip(row) {
+            if col.not_null && val.is_null() {
+                return Err(DbError::NotNullViolation {
+                    column: col.name.clone(),
+                });
+            }
             if !col.accepts(val) {
                 return Err(DbError::TypeMismatch {
                     column: col.name.clone(),
@@ -223,5 +240,37 @@ mod tests {
                 got: Some(DataType::Int)
             }
         )
+    }
+
+    fn accounts() -> Schema {
+        Schema::new(vec![
+            Column::new("id", DataType::Int).not_null(),
+            Column::new("nickname", DataType::Text),
+        ])
+        .unwrap()
+    }
+
+    #[test]
+    fn rejects_null_in_not_null_column() {
+        let row = vec![Value::Null, Value::Text("ada".into())];
+        assert_eq!(
+            accounts().validate_row(&row).unwrap_err(),
+            DbError::NotNullViolation {
+                column: "id".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn not_null_column_accepts_a_value_and_others_still_take_null() {
+        let row = vec![Value::Int(1), Value::Null];
+        assert!(accounts().validate_row(&row).is_ok());
+    }
+
+    #[test]
+    fn columns_are_nullable_unless_marked() {
+        let schema = accounts();
+        assert!(schema.columns()[0].is_not_null());
+        assert!(!schema.columns()[1].is_not_null());
     }
 }

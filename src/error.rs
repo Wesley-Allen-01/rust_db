@@ -22,6 +22,11 @@ pub enum DbError {
         got: Option<DataType>,
     },
 
+    /// A NULL was given for a Column with the NOT NULL Constraint.
+    NotNullViolation {
+        column: String,
+    },
+
     NoSuchColumn {
         name: String,
     },
@@ -92,6 +97,10 @@ impl fmt::Display for DbError {
             } => {
                 let got = type_name(got);
                 write!(f, "column `{column}` expects {expected}, got {got}")
+            }
+
+            DbError::NotNullViolation { column } => {
+                write!(f, "column `{column}` is NOT NULL, got NULL")
             }
 
             DbError::NoSuchColumn { name } => {

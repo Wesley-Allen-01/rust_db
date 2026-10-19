@@ -52,6 +52,8 @@ fn describe_table(db: &Database, name: &str) -> Result<String, String> {
             vec![
                 Value::Text(column.name().to_string()),
                 Value::Text(column.data_type().to_string()),
+                // psql's wording: "not null", or blank for a nullable Column.
+                Value::Text(if column.is_not_null() { "not null" } else { "" }.to_string()),
             ]
         })
         .collect();
@@ -59,6 +61,7 @@ fn describe_table(db: &Database, name: &str) -> Result<String, String> {
         columns: vec![
             ResultColumn::new("Column", DataType::Text),
             ResultColumn::new("Type", DataType::Text),
+            ResultColumn::new("Nullable", DataType::Text),
         ],
         rows,
     };
@@ -98,7 +101,7 @@ mod tests {
     fn db_with_tables() -> Database {
         let mut db = Database::new();
         let users = Schema::new(vec![
-            Column::new("id", DataType::Int),
+            Column::new("id", DataType::Int).not_null(),
             Column::new("name", DataType::Text),
         ])
         .unwrap();
@@ -128,14 +131,14 @@ mod tests {
     }
 
     #[test]
-    fn describe_shows_columns_and_data_types() {
+    fn describe_shows_columns_data_types_and_not_null() {
         assert_eq!(
             printed(run_meta(&db_with_tables(), "\\d  USERS ")),
             "Table \"users\"\n \
-             Column | Type \n\
-             --------+------\n \
-             id     | INT\n \
-             name   | TEXT\n\
+             Column | Type | Nullable \n\
+             --------+------+----------\n \
+             id     | INT  | not null\n \
+             name   | TEXT |\n\
              (2 rows)\n"
         );
     }

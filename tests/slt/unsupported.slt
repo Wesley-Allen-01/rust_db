@@ -1,4 +1,4 @@
 # Statements whose slices have not landed yet are rejected.
 
 statement error not yet supported
-CREATE TABLE users (id INT);
+INSERT INTO users VALUES (1);

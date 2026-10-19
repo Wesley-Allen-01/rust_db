@@ -1,11 +1,36 @@
 //! The parsed shape of a Statement, before any names or Data Types are checked.
 
-use crate::value::Value;
+use crate::value::{DataType, Value};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     Select(Select),
+    CreateTable(CreateTable),
+    DropTable(DropTable),
+}
+
+/// `CREATE TABLE [IF NOT EXISTS] name (column, ...)`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateTable {
+    pub name: String,
+    pub columns: Vec<ColumnDef>,
+    pub if_not_exists: bool,
+}
+
+/// One Column in a CREATE TABLE: `name TYPE [NOT NULL]`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColumnDef {
+    pub name: String,
+    pub data_type: DataType,
+    pub not_null: bool,
+}
+
+/// `DROP TABLE [IF EXISTS] name`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DropTable {
+    pub name: String,
+    pub if_exists: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

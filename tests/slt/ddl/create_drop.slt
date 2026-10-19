@@ -1,0 +1,25 @@
+# CREATE TABLE and DROP TABLE. Without SELECT ... FROM, a Table's existence
+# shows through the errors CREATE and DROP give.
+
+statement ok
+CREATE TABLE users (id INT NOT NULL, name TEXT, score FLOAT, active BOOL);
+
+statement error table `users` already exists
+CREATE TABLE users (id INT);
+
+# Unquoted names fold to lowercase, so USERS is users.
+statement error table `users` already exists
+CREATE TABLE USERS (id INT);
+
+statement ok
+DROP TABLE users;
+
+statement error no such table `users`
+DROP TABLE users;
+
+# The name is free again once dropped.
+statement ok
+CREATE TABLE users (id INT)
+
+statement ok
+drop table Users
