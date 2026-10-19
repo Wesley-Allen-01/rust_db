@@ -54,7 +54,11 @@ fn column_widths(columns: &[String], cells: &[Vec<String>]) -> Vec<usize> {
         .iter()
         .enumerate()
         .map(|(i, name)| {
-            let widest_cell = cells.iter().map(|row| row[i].chars().count()).max().unwrap_or(0);
+            let widest_cell = cells
+                .iter()
+                .map(|row| row[i].chars().count())
+                .max()
+                .unwrap_or(0);
             name.chars().count().max(widest_cell)
         })
         .collect()
